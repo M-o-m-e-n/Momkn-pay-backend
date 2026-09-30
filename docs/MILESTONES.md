@@ -213,54 +213,54 @@ flowchart LR
 
 ## M3 — Payment flow (days 11–15)
 
-- [ ] **M3 complete** (all slices done and the exit demo passed)
+- [ ] **M3 complete** (all slices done and the exit demo passed) *(all slices merged, Newman 38/38 green; the on-device payment demo is on the client apps)*
 
 **Goal:** inquiry → confirm → receipt with encryption, idempotency and every mock rule. This is the heaviest week, so protect it.
 **Exit demo:** a full payment with `1024750891` (total 25 320) on both devices, then digits 0, 6, 7, 8, 9, a `_slow` service, an inactive service, wrong PIN ×3, an expired inquiry and a retry with the same key.
 
-- [ ] **M3-S1 · Fee calculator and mock engine (pure)**
-  - [ ] `FeeCalculator` (`Math.ceilDiv`), `MockPaymentEngine`, `InquiryDecision`, `CustomerNames`, billMonth logic.
-  - [ ] **Done when:** U6–U9 pass: worked example 24750 → 500/70/25320, percentage fee rows, every last digit 0–9, the min-amount clamp. No database, no Spring context.
+- [x] **M3-S1 · Fee calculator and mock engine (pure)**
+  - [x] `FeeCalculator` (`Math.ceilDiv`), `MockPaymentEngine`, `InquiryDecision`, `CustomerNames`, billMonth logic.
+  - [x] **Done when:** U6–U9 pass: worked example 24750 → 500/70/25320, percentage fee rows, every last digit 0–9, the min-amount clamp. No database, no Spring context.
   - Refs: FR-MCK-1, SRS §6, LLD §9.1–9.2
 
-- [ ] **M3-S2 · `POST /v1/payments/inquiry`**
-  - [ ] `InquiryService.inquire` with the check order from LLD §6.7, pattern cache, persistence with a 5-min expiry, masked logging.
-  - [ ] **Done when:** `PaymentFlowIT` (inquiry part): the digit-1 happy path returns the exact contract JSON. Digit 0 → 404, 9 → 409, a bad pattern → 400 `subscriberNumber`, unknown service → 404, inactive → 503.
+- [x] **M3-S2 · `POST /v1/payments/inquiry`**
+  - [x] `InquiryService.inquire` with the check order from LLD §6.7, pattern cache, persistence with a 5-min expiry, masked logging.
+  - [x] **Done when:** `PaymentFlowIT` (inquiry part): the digit-1 happy path returns the exact contract JSON. Digit 0 → 404, 9 → 409, a bad pattern → 400 `subscriberNumber`, unknown service → 404, inactive → 503. *(`PaymentFlowIT` was split into `InquiryIT`, `ConfirmIT`, `ConfirmFailuresIT`, `PendingIT` and `TransactionIT`)*
   - Refs: FR-INQ-1…9, LLD §9.3
 
-- [ ] **M3-S3 · `_slow` delay**
-  - [ ] `SlowServiceDelay` (injectable, so tests can check it without sleeping), applied in a `finally` after the transaction. Virtual threads on.
-  - [ ] **Done when:** U10 passes. Manually, `svc_elec_canal_slow` takes ≈ 8 s while other requests stay fast.
+- [x] **M3-S3 · `_slow` delay**
+  - [x] `SlowServiceDelay` (injectable, so tests can check it without sleeping), applied in a `finally` after the transaction. Virtual threads on.
+  - [x] **Done when:** U10 passes. Manually, `svc_elec_canal_slow` takes ≈ 8 s while other requests stay fast. *(0.2 s in tests; the Newman run confirms ≈ 8 s against Docker)*
   - Refs: FR-MCK-2, NFR-PER-2
 
-- [ ] **M3-S4 · `POST /v1/payments/confirm` — happy path**
-  - [ ] `ConfirmService` with a `TransactionTemplate` and the `ConfirmOutcome` model, row lock on the inquiry, PIN check, `ReferenceGenerator`, and `SUCCESS` for digits 1–5.
-  - [ ] **Done when:** `PaymentFlowIT`: inquiry → confirm → 200 `SUCCESS`, `reference` in the form `MP-YYYYMMDD-NNNN`, inquiry `CONFIRMED`. Confirming again with a new key → `INQUIRY_ALREADY_CONFIRMED`. U19 passes.
+- [x] **M3-S4 · `POST /v1/payments/confirm` — happy path**
+  - [x] `ConfirmService` with a `TransactionTemplate` and the `ConfirmOutcome` model, row lock on the inquiry, PIN check, `ReferenceGenerator`, and `SUCCESS` for digits 1–5.
+  - [x] **Done when:** `PaymentFlowIT`: inquiry → confirm → 200 `SUCCESS`, `reference` in the form `MP-YYYYMMDD-NNNN`, inquiry `CONFIRMED`. Confirming again with a new key → `INQUIRY_ALREADY_CONFIRMED`. U19 passes.
   - Refs: FR-PAY-1, FR-PAY-5, FR-PAY-9…10, LLD §9.4–9.5
 
-- [ ] **M3-S5 · Idempotency**
-  - [ ] Replay lookup before decryption, re-check under the lock, catching the unique-constraint violation, `IDEMPOTENCY_CONFLICT`.
-  - [ ] **Done when:** U12 and U13 pass. `ConcurrencyIT`: 10 parallel confirms with the same key → 1 row and the same `transactionId` everywhere. A retry of the same bytes (same nonce) returns the receipt instead of `DECRYPTION_FAILED`.
+- [x] **M3-S5 · Idempotency**
+  - [x] Replay lookup before decryption, re-check under the lock, catching the unique-constraint violation, `IDEMPOTENCY_CONFLICT`.
+  - [x] **Done when:** U12 and U13 pass. `ConcurrencyIT`: 10 parallel confirms with the same key → 1 row and the same `transactionId` everywhere. A retry of the same bytes (same nonce) returns the receipt instead of `DECRYPTION_FAILED`.
   - Refs: FR-PAY-2…4, NFR-REL-1…2, HLD §8.4
 
-- [ ] **M3-S6 · Failure outcomes on confirm**
-  - [ ] Wrong PIN counter (3 → `INVALIDATED`), expired inquiry, `AMOUNT_OUT_OF_RANGE` (digit 6), a `FAILED` transaction plus 402 (digit 7), inactive service → 503.
-  - [ ] **Done when:** U11 and U14–U16 pass. Replaying the digit-7 key returns the same 402. `usr_03` with PIN `1234` → `VALIDATION_ERROR(pin)`.
+- [x] **M3-S6 · Failure outcomes on confirm**
+  - [x] Wrong PIN counter (3 → `INVALIDATED`), expired inquiry, `AMOUNT_OUT_OF_RANGE` (digit 6), a `FAILED` transaction plus 402 (digit 7), inactive service → 503.
+  - [x] **Done when:** U11 and U14–U16 pass. Replaying the digit-7 key returns the same 402. `usr_03` with PIN `1234` → `VALIDATION_ERROR(pin)`.
   - Refs: FR-PAY-5…8, SRS §6.1
 
-- [ ] **M3-S7 · PENDING and its resolution**
-  - [ ] `PENDING` for digit 8 with `pendingUntil = now + 10s`, `PendingResolver.resolveIfDue` and the `sweep` job.
-  - [ ] **Done when:** U17 passes. `PaymentFlowIT`: confirm → `PENDING` with `paidAt: null`. After the clock advances 10 s, the receipt shows `SUCCESS` and `paidAt = pendingUntil`.
+- [x] **M3-S7 · PENDING and its resolution**
+  - [x] `PENDING` for digit 8 with `pendingUntil = now + 10s`, `PendingResolver.resolveIfDue` and the `sweep` job.
+  - [x] **Done when:** U17 passes. `PaymentFlowIT`: confirm → `PENDING` with `paidAt: null`. After the clock advances 10 s, the receipt shows `SUCCESS` and `paidAt = pendingUntil`. *(the tests move `pending_until` into the past instead of advancing a clock)*
   - Refs: FR-TXN-5, HLD §8.5, LLD §9.6
 
-- [ ] **M3-S8 · History and receipt**
-  - [ ] `V4__seed_history.sql` (6 transactions for `usr_01`), `TransactionService.list/receipt`, `PageResponse`, pagination validation.
-  - [ ] **Done when:** `PaymentFlowIT`: `usr_01` history is newest first with correct paging totals. `usr_02` → empty list. Receipt fields match LLD §6.10. Another user's receipt → 404 `TRANSACTION_NOT_FOUND`. `size=51` → 400.
+- [x] **M3-S8 · History and receipt**
+  - [x] `V4__seed_history.sql` (6 transactions for `usr_01`), `TransactionService.list/receipt`, `PageResponse`, pagination validation.
+  - [x] **Done when:** `PaymentFlowIT`: `usr_01` history is newest first with correct paging totals. `usr_02` → empty list. Receipt fields match LLD §6.10. Another user's receipt → 404 `TRANSACTION_NOT_FOUND`. `size=51` → 400.
   - Refs: FR-TXN-1…4, FR-SEED-4, LLD §6.9–6.10, §11.3
 
-- [ ] **M3-S9 · Postman: every mock rule**
-  - [ ] Folders 04–06 with the pre-request encrypt helper, and one request per rule and error.
-  - [ ] **Done when:** a Postman or Newman run of the whole collection is green on a fresh `docker compose up`.
+- [x] **M3-S9 · Postman: every mock rule**
+  - [x] Folders 04–06 with the pre-request encrypt helper, and one request per rule and error.
+  - [x] **Done when:** a Postman or Newman run of the whole collection is green on a fresh `docker compose up`. *(Newman on a fresh stack: 39 requests, 38 assertions, 0 failures)*
   - Refs: FR-MCK-3, NFR-DOC-3
 
 ---

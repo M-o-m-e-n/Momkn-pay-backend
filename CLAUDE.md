@@ -99,6 +99,8 @@ Use the Maven wrapper. Integration tests (`*IT`) need Docker running (Testcontai
 | Certificates / SPKI pins | `TLS_KEYSTORE_PASSWORD=... ./scripts/generate-certs.sh` |
 | Run locally | `docker compose up --build` → `https://api.momknpay.local/docs` |
 | Lint the contract | `npx @redocly/cli lint docs/openapi.yaml` |
+| Postman collection against the local stack | `npx newman run postman/momknpay.postman_collection.json --insecure --env-var "baseUrl=https://localhost/v1"` |
+| After editing `postman/momkn-encrypt.js` | `node scripts/verify-postman-crypto.js && node scripts/sync-postman-crypto.js` |
 
 ## Environment notes
 
