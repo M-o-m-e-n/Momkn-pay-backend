@@ -1,0 +1,23 @@
+# build
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# secrets & local config — never commit
+.env
+certs/
+*.p12
+*.pem
+*.key
+*.jks
+
+# OS
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
