@@ -1,0 +1,11 @@
+# keep the build context small and secret-free
+target/
+.git/
+.idea/
+.github/
+docs/
+postman/
+scripts/
+certs/
+.env
+*.md
