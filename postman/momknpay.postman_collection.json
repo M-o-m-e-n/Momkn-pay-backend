@@ -1,0 +1,506 @@
+{
+  "info": {
+    "_postman_id": "8a0c4e6f-1b2d-4c3e-9f5a-7b6c5d4e3f21",
+    "name": "Momkn Pay v1",
+    "description": "Every endpoint and every mock rule of the Momkn Pay backend (contract: docs/openapi.yaml).\n\nNo authentication: set `userId` to usr_01 / usr_02 / usr_03.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.momknpay.local/v1"
+    },
+    {
+      "key": "platform",
+      "value": "ios"
+    },
+    {
+      "key": "clientVersion",
+      "value": "1.0.0"
+    },
+    {
+      "key": "userId",
+      "value": "usr_01"
+    },
+    {
+      "key": "requestId",
+      "value": ""
+    },
+    {
+      "key": "sessionId",
+      "value": ""
+    },
+    {
+      "key": "sessionKey",
+      "value": ""
+    },
+    {
+      "key": "syncedAt",
+      "value": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// fresh X-Request-Id for every request",
+          "pm.collectionVariables.set('requestId', pm.variables.replaceIn('{{$guid}}'));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Setup",
+      "description": "Select an environment, set userId, then run 01 → Create session first.",
+      "item": []
+    },
+    {
+      "name": "01 Sessions",
+      "item": [
+        {
+          "name": "Create session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            },
+            "description": "Stores sessionId and sessionKey in collection variables for the payment folders."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('sessionId', body.sessionId);",
+                  "pm.collectionVariables.set('sessionKey', body.sessionKey);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Revoke session",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                "{{sessionId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Profile",
+      "item": [
+        {
+          "name": "Get profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Mina Adel\",\n  \"email\": \"mina@example.com\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update profile — mobile is read-only (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"01011111111\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('VALIDATION_ERROR on mobile', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(e.field).to.eql('mobile');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update profile — duplicate email (409)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"sara@example.com\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EMAIL_ALREADY_USED', () => pm.expect(pm.response.json().error.code).to.eql('EMAIL_ALREADY_USED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Catalogue",
+      "item": [
+        {
+          "name": "List services",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/services",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "services"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 with ≥ 24 services', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.items.length).to.be.at.least(24);",
+                  "  pm.collectionVariables.set('syncedAt', body.syncedAt);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sync services",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/services/sync?since={{syncedAt}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "services",
+                "sync"
+              ],
+              "query": [
+                {
+                  "key": "since",
+                  "value": "{{syncedAt}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Sync services — bad since (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/services/sync?since=yesterday",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "services",
+                "sync"
+              ],
+              "query": [
+                {
+                  "key": "since",
+                  "value": "yesterday"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('field = since', () => pm.expect(pm.response.json().error.field).to.eql('since'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Inquiry rules",
+      "description": "Filled in by slice M3-S9. Requests need the AES-GCM encrypt helper (collection pre-request script).",
+      "item": []
+    },
+    {
+      "name": "05 Confirm rules",
+      "description": "Filled in by slice M3-S9. Requests need the AES-GCM encrypt helper (collection pre-request script).",
+      "item": []
+    },
+    {
+      "name": "06 History",
+      "description": "Filled in by slice M3-S9. Requests need the AES-GCM encrypt helper (collection pre-request script).",
+      "item": []
+    }
+  ]
+}
