@@ -1,0 +1,842 @@
+openapi: 3.1.0
+info:
+  title: Momkn Pay API
+  version: 1.0.0
+  summary: Simulated bill-payment API for the Momkn Pay internship capstone.
+  description: |
+    Contract shared by the backend, iOS and Android tracks. Frozen after publication:
+    any change needs an issue, sign-off from both client tracks and a version bump below.
+
+    **No authentication.** Every endpoint is public. User-scoped endpoints take the user
+    from the `X-User-Id` header (see docs/DECISIONS.md, ADR-001/002).
+
+    **Conventions**
+    - Money is integer **piastres** (`4550` = 45.50 EGP). Never floats.
+    - Timestamps are ISO 8601 UTC with second precision (`2026-09-20T10:00:00Z`).
+    - Every non-2xx response uses the `ErrorResponse` envelope. Clients switch on `error.code`.
+    - Sensitive fields (subscriber number, PIN) travel AES-256-GCM encrypted in `payload`:
+      `base64(iv[12] ‖ ciphertext ‖ tag[16])`, key = the `sessionKey` from `POST /sessions`,
+      no AAD, plaintext JSON always carries `nonce` (32 hex chars) and `ts` (unix seconds).
+      The server rejects `ts` more than 120 s from server time and any reused `nonce`.
+
+    ## Changelog
+    | Version | Date | Change |
+    |---|---|---|
+    | 1.0.0 | 2026-10-06 | Initial contract (no-auth variant of the capstone brief). |
+# Deliberately public: no security schemes (ADR-001).
+security: []
+servers:
+  - url: https://api.momknpay.local/v1
+    description: Local (Docker Compose, self-signed certificate — pin the published SPKI hash)
+tags:
+  - name: Sessions
+    description: Crypto sessions that issue the AES-256 payload key.
+  - name: Profile
+    description: The current user's profile.
+  - name: Catalogue
+    description: Payable services and delta sync for offline-first clients.
+  - name: Payments
+    description: Fees inquiry and idempotent payment confirmation.
+  - name: Transactions
+    description: Payment history and receipts.
+
+paths:
+  /sessions:
+    post:
+      tags: [Sessions]
+      operationId: createSession
+      summary: Create a crypto session and receive the AES-256 payload key
+      description: |
+        Returns a fresh 32-byte key (base64) valid for 30 minutes. The key is returned **only here**;
+        keep it in memory, never on disk. Rate-limited to 5 per minute per user.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '201':
+          description: Session created.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateSessionResponse' }
+              example:
+                sessionId: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60
+                sessionKey: q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=
+                expiresAt: '2026-09-20T10:30:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /sessions/{sessionId}:
+    delete:
+      tags: [Sessions]
+      operationId: revokeSession
+      summary: Revoke a session (the key stops working immediately)
+      description: Idempotent — revoking an already revoked session also returns 204.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '204':
+          description: Revoked.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /profile:
+    get:
+      tags: [Profile]
+      operationId: getProfile
+      summary: Current user's profile
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Profile.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+              example:
+                id: usr_01
+                fullName: Mina Adel
+                mobile: '01000000001'
+                email: mina@example.com
+                memberSince: '2026-09-01T09:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Profile]
+      operationId: updateProfile
+      summary: Update full name and/or email (mobile is read-only)
+      description: |
+        At least one field is required. Any other property — including `mobile` — is rejected
+        with `VALIDATION_ERROR` naming it. Duplicate email → `EMAIL_ALREADY_USED`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProfileRequest' }
+      responses:
+        '200':
+          description: Updated profile.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+              example:
+                id: usr_01
+                fullName: Mina Adel
+                mobile: '01000000001'
+                email: mina@example.com
+                memberSince: '2026-09-01T09:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /services:
+    get:
+      tags: [Catalogue]
+      operationId: listServices
+      summary: Full catalogue (inactive services included, deleted ones excluded)
+      description: Store `syncedAt` and send it as `since` on the next `/services/sync`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+      responses:
+        '200':
+          description: Catalogue snapshot.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogResponse' }
+              example:
+                syncedAt: '2026-09-20T10:00:00Z'
+                items:
+                  - id: svc_elec_cairo
+                    nameEn: Cairo Electricity
+                    nameAr: كهرباء القاهرة
+                    category: electricity
+                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    inputLabel: Subscriber number
+                    inputPattern: '^[0-9]{10}$'
+                    minAmount: 500
+                    maxAmount: 500000
+                    isActive: true
+                    updatedAt: '2026-09-18T09:00:00Z'
+                  - id: svc_elec_alex
+                    nameEn: Alexandria Electricity
+                    nameAr: كهرباء الإسكندرية
+                    category: electricity
+                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    inputLabel: Subscriber number
+                    inputPattern: '^[0-9]{10}$'
+                    minAmount: 500
+                    maxAmount: 500000
+                    isActive: false
+                    updatedAt: '2026-09-18T09:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /services/sync:
+    get:
+      tags: [Catalogue]
+      operationId: syncServices
+      summary: Services changed or deleted at or after `since`
+      description: |
+        At-least-once: the filter is `>= since` (second precision), so a boundary row can arrive
+        twice. Clients upsert `items` and delete `deletedIds`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - name: since
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+      responses:
+        '200':
+          description: Delta.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncResponse' }
+              example:
+                syncedAt: '2026-09-20T12:00:00Z'
+                items:
+                  - id: svc_elec_cairo
+                    nameEn: Cairo Electricity
+                    nameAr: كهرباء القاهرة
+                    category: electricity
+                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    inputLabel: Subscriber number
+                    inputPattern: '^[0-9]{10}$'
+                    minAmount: 500
+                    maxAmount: 500000
+                    isActive: true
+                    updatedAt: '2026-09-18T09:00:00Z'
+                deletedIds: [svc_water_legacy]
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /payments/inquiry:
+    post:
+      tags: [Payments]
+      operationId: createInquiry
+      summary: Fees inquiry for a subscriber (encrypted subscriber number)
+      description: |
+        `payload` decrypts to `InquiryPayload`. The quote is valid for 5 minutes (`expiresAt`).
+
+        **Mock rules (last digit of the subscriber number):** 0 → `SUBSCRIBER_NOT_FOUND`;
+        1–5 → normal bill (`amountDue` = digits 3–7, at least `minAmount`); 6 → bill above
+        `maxAmount` (confirm will fail with `AMOUNT_OUT_OF_RANGE`); 7 → confirm declines with
+        `INSUFFICIENT_BALANCE`; 8 → confirm returns `PENDING`, `SUCCESS` after 10 s;
+        9 → `BILL_ALREADY_PAID`. Services whose id ends in `_slow` respond after 8 s.
+        Inactive services → `SERVICE_UNAVAILABLE`.
+
+        **Fees (piastres, rounded up):** `serviceFee = max(500, ceil(0.005 × amountDue))`,
+        `vat = ceil(0.14 × serviceFee)`, `total = amountDue + serviceFee + vat`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InquiryRequest' }
+      responses:
+        '200':
+          description: Quote.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InquiryResponse' }
+              example:
+                inquiryId: inq_8f21a0c4d9e7b312
+                serviceId: svc_elec_cairo
+                customerName: Mina A.
+                billMonth: 2026-08
+                amountDue: 24750
+                serviceFee: 500
+                vat: 70
+                total: 25320
+                currency: EGP
+                expiresAt: '2026-09-20T10:05:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /payments/confirm:
+    post:
+      tags: [Payments]
+      operationId: confirmPayment
+      summary: Pay an open inquiry with the PIN (encrypted, idempotent)
+      description: |
+        `payload` decrypts to `ConfirmPayload`. The server checks `Idempotency-Key` **before**
+        decrypting: a repeated key returns the same transaction (with its current status) and
+        never creates a second one — the retry may resend the exact same bytes.
+
+        Wrong PIN → `VALIDATION_ERROR` with `field: "pin"`; the third wrong PIN on an inquiry
+        invalidates it (`INQUIRY_INVALIDATED` afterwards). Rate-limited to 5 per minute per user.
+        A declined payment is recorded as a `FAILED` transaction and returned as
+        `INSUFFICIENT_BALANCE`; the inquiry stays open for a retry with a new key.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmRequest' }
+      responses:
+        '200':
+          description: '`SUCCESS` or `PENDING` — first call and replays alike.'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmResponse' }
+              example:
+                transactionId: txn_5521
+                status: SUCCESS
+                reference: MP-20260920-5521
+                paidAt: '2026-09-20T10:02:11Z'
+                total: 25320
+                service: { id: svc_elec_cairo, nameEn: Cairo Electricity, nameAr: كهرباء القاهرة }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402':
+          description: '`INSUFFICIENT_BALANCE` (simulated decline).'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '422':
+          description: '`AMOUNT_OUT_OF_RANGE`.'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /payments/transactions:
+    get:
+      tags: [Transactions]
+      operationId: listTransactions
+      summary: The user's transactions, newest first
+      description: '`PENDING` rows whose 10 s have passed are reported as `SUCCESS`.'
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: One page.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionPage' }
+              example:
+                items:
+                  - transactionId: txn_5521
+                    status: SUCCESS
+                    reference: MP-20260920-5521
+                    total: 25320
+                    createdAt: '2026-09-20T10:02:11Z'
+                    paidAt: '2026-09-20T10:02:11Z'
+                    failureCode: null
+                    service: { id: svc_elec_cairo, nameEn: Cairo Electricity, nameAr: كهرباء القاهرة, category: electricity }
+                  - transactionId: txn_5519
+                    status: FAILED
+                    reference: MP-20260920-5519
+                    total: 14830
+                    createdAt: '2026-09-20T09:48:00Z'
+                    paidAt: null
+                    failureCode: INSUFFICIENT_BALANCE
+                    service: { id: svc_water_cairo, nameEn: Greater Cairo Water, nameAr: مياه القاهرة الكبرى, category: water }
+                page: 0
+                size: 20
+                totalItems: 2
+                totalPages: 1
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /payments/transactions/{id}:
+    get:
+      tags: [Transactions]
+      operationId: getReceipt
+      summary: Full receipt of one transaction
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, maxLength: 32 }
+          example: txn_5521
+      responses:
+        '200':
+          description: Receipt.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+              example:
+                transactionId: txn_5521
+                inquiryId: inq_8f21a0c4d9e7b312
+                status: SUCCESS
+                failureCode: null
+                reference: MP-20260920-5521
+                service: { id: svc_elec_cairo, nameEn: Cairo Electricity, nameAr: كهرباء القاهرة, category: electricity }
+                subscriberNumber: '1024750891'
+                customerName: Mina A.
+                billMonth: 2026-08
+                amountDue: 24750
+                serviceFee: 500
+                vat: 70
+                total: 25320
+                currency: EGP
+                createdAt: '2026-09-20T10:02:11Z'
+                paidAt: '2026-09-20T10:02:11Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: true
+      description: Client-generated UUID, echoed back in the response and logged on every line.
+      schema: { type: string, format: uuid }
+      example: 3f6c1d2e-8a4b-4c1e-9f0a-2b7d5e6c8a91
+    ClientPlatform:
+      name: X-Client-Platform
+      in: header
+      required: true
+      schema: { type: string, enum: [ios, android] }
+    ClientVersion:
+      name: X-Client-Version
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 32 }
+      example: 1.0.0
+    UserId:
+      name: X-User-Id
+      in: header
+      required: true
+      description: The user this request acts for. Trusted as-is (no authentication).
+      schema: { type: string, maxLength: 32 }
+      example: usr_01
+    SessionId:
+      name: X-Session-Id
+      in: header
+      required: true
+      description: Session whose key encrypted `payload`. Must belong to `X-User-Id`.
+      schema: { type: string, maxLength: 40 }
+      example: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated UUID, one per payment confirmation. Repeating it returns the same
+        transaction (current status) without creating a new one.
+      schema: { type: string, format: uuid }
+      example: 6b1f0c2a-9d4e-4b7a-8c3f-1e2d3c4b5a69
+
+  headers:
+    RequestId:
+      description: Echo of the request's `X-Request-Id`.
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds until another attempt is allowed.
+      schema: { type: integer, minimum: 1 }
+
+  schemas:
+    Money:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Amount in piastres (1 EGP = 100 piastres).
+      example: 25320
+    Timestamp:
+      type: string
+      format: date-time
+      description: ISO 8601 UTC, second precision.
+      example: '2026-09-20T10:00:00Z'
+
+    CreateSessionResponse:
+      type: object
+      required: [sessionId, sessionKey, expiresAt]
+      properties:
+        sessionId: { type: string, example: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60 }
+        sessionKey:
+          type: string
+          format: byte
+          description: base64 of 32 random bytes (AES-256 key). Memory only on the client.
+          example: q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=
+        expiresAt: { $ref: '#/components/schemas/Timestamp' }
+
+    Profile:
+      type: object
+      required: [id, fullName, mobile, email, memberSince]
+      properties:
+        id: { type: string, example: usr_01 }
+        fullName: { type: string, example: Mina Adel }
+        mobile: { type: string, pattern: '^01[0125][0-9]{8}$', example: '01000000001' }
+        email: { type: string, format: email, example: mina@example.com }
+        memberSince: { $ref: '#/components/schemas/Timestamp' }
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        fullName: { type: string, minLength: 2, maxLength: 100, example: Mina Adel Fawzy }
+        email: { type: string, format: email, maxLength: 254, example: mina.adel@example.com }
+
+    ServiceCategory:
+      type: string
+      enum: [electricity, water, gas, internet, mobile, landline]
+    ServiceItem:
+      type: object
+      required: [id, nameEn, nameAr, category, iconUrl, inputLabel, inputPattern, minAmount, maxAmount, isActive, updatedAt]
+      properties:
+        id: { type: string, example: svc_elec_cairo }
+        nameEn: { type: string, example: Cairo Electricity }
+        nameAr: { type: string, example: كهرباء القاهرة }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        iconUrl: { type: string, format: uri, example: 'https://cdn.momknpay.local/icons/electricity.png' }
+        inputLabel: { type: string, example: Subscriber number }
+        inputPattern:
+          type: string
+          description: Regular expression the subscriber number must match (validate client-side too).
+          example: '^[0-9]{10}$'
+        minAmount: { $ref: '#/components/schemas/Money' }
+        maxAmount: { $ref: '#/components/schemas/Money' }
+        isActive:
+          type: boolean
+          description: Inactive services are shown disabled, never hidden.
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    CatalogResponse:
+      type: object
+      required: [syncedAt, items]
+      properties:
+        syncedAt: { $ref: '#/components/schemas/Timestamp' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ServiceItem' }
+    SyncResponse:
+      type: object
+      required: [syncedAt, items, deletedIds]
+      properties:
+        syncedAt: { $ref: '#/components/schemas/Timestamp' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ServiceItem' }
+        deletedIds:
+          type: array
+          items: { type: string }
+          example: [svc_water_legacy]
+
+    EncryptedPayload:
+      type: string
+      format: byte
+      maxLength: 4096
+      description: base64( iv[12] ‖ AES-256-GCM ciphertext ‖ tag[16] ), fresh IV per message.
+      example: AAECAwQFBgcICQoLjXq9mWQ2Zx0fYk1c3gUqvLw7r0E=
+    InquiryRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceId, payload]
+      properties:
+        serviceId: { type: string, maxLength: 64, example: svc_elec_cairo }
+        payload: { $ref: '#/components/schemas/EncryptedPayload' }
+    InquiryPayload:
+      type: object
+      description: Plaintext inside `InquiryRequest.payload` (never sent unencrypted).
+      required: [subscriberNumber, nonce, ts]
+      properties:
+        subscriberNumber: { type: string, example: '1024750891' }
+        nonce: { type: string, pattern: '^[0-9a-f]{32}$', example: 7f3a9c0e1b2d4f6a8c0e2b4d6f8a0c1e }
+        ts: { type: integer, format: int64, description: Unix seconds, example: 1790000000 }
+    InquiryResponse:
+      type: object
+      required: [inquiryId, serviceId, customerName, billMonth, amountDue, serviceFee, vat, total, currency, expiresAt]
+      properties:
+        inquiryId: { type: string, example: inq_8f21a0c4d9e7b312 }
+        serviceId: { type: string, example: svc_elec_cairo }
+        customerName: { type: string, example: Mina A. }
+        billMonth: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$', example: 2026-08 }
+        amountDue: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 24750 }
+        serviceFee: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 500 }
+        vat: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 70 }
+        total: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 25320 }
+        currency: { type: string, const: EGP }
+        expiresAt: { $ref: '#/components/schemas/Timestamp' }
+
+    ConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [inquiryId, payload]
+      properties:
+        inquiryId: { type: string, maxLength: 32, example: inq_8f21a0c4d9e7b312 }
+        payload: { $ref: '#/components/schemas/EncryptedPayload' }
+    ConfirmPayload:
+      type: object
+      description: Plaintext inside `ConfirmRequest.payload`. The PIN is never stored or logged.
+      required: [pin, nonce, ts]
+      properties:
+        pin: { type: string, pattern: '^[0-9]{4}$', example: '1234' }
+        nonce: { type: string, pattern: '^[0-9a-f]{32}$', example: 0a1b2c3d4e5f60718293a4b5c6d7e8f9 }
+        ts: { type: integer, format: int64, example: 1790000060 }
+    TransactionStatus:
+      type: string
+      enum: [SUCCESS, FAILED, PENDING]
+    ServiceRef:
+      type: object
+      required: [id, nameEn, nameAr]
+      properties:
+        id: { type: string, example: svc_elec_cairo }
+        nameEn: { type: string, example: Cairo Electricity }
+        nameAr: { type: string, example: كهرباء القاهرة }
+    ServiceSummary:
+      allOf:
+        - $ref: '#/components/schemas/ServiceRef'
+        - type: object
+          required: [category]
+          properties:
+            category: { $ref: '#/components/schemas/ServiceCategory' }
+    ConfirmResponse:
+      type: object
+      required: [transactionId, status, reference, paidAt, total, service]
+      properties:
+        transactionId: { type: string, example: txn_5521 }
+        status: { $ref: '#/components/schemas/TransactionStatus' }
+        reference: { type: string, pattern: '^MP-[0-9]{8}-[0-9]{4,}$', example: MP-20260920-5521 }
+        paidAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+          description: '`null` while `PENDING`.'
+        total: { $ref: '#/components/schemas/Money' }
+        service: { $ref: '#/components/schemas/ServiceRef' }
+
+    TransactionItem:
+      type: object
+      required: [transactionId, status, reference, total, createdAt, paidAt, failureCode, service]
+      properties:
+        transactionId: { type: string, example: txn_5521 }
+        status: { $ref: '#/components/schemas/TransactionStatus' }
+        reference: { type: string, example: MP-20260920-5521 }
+        total: { $ref: '#/components/schemas/Money' }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        paidAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        failureCode:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorCode'
+            - type: 'null'
+          description: Set only when `status` is `FAILED`.
+        service: { $ref: '#/components/schemas/ServiceSummary' }
+    TransactionPage:
+      type: object
+      required: [items, page, size, totalItems, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TransactionItem' }
+        page: { type: integer, example: 0 }
+        size: { type: integer, example: 20 }
+        totalItems: { type: integer, format: int64, example: 6 }
+        totalPages: { type: integer, example: 1 }
+    Receipt:
+      type: object
+      required: [transactionId, inquiryId, status, failureCode, reference, service, subscriberNumber, customerName,
+                 billMonth, amountDue, serviceFee, vat, total, currency, createdAt, paidAt]
+      properties:
+        transactionId: { type: string, example: txn_5521 }
+        inquiryId: { type: string, example: inq_8f21a0c4d9e7b312 }
+        status: { $ref: '#/components/schemas/TransactionStatus' }
+        failureCode:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorCode'
+            - type: 'null'
+        reference: { type: string, example: MP-20260920-5521 }
+        service: { $ref: '#/components/schemas/ServiceSummary' }
+        subscriberNumber: { type: string, example: '1024750891' }
+        customerName: { type: string, example: Mina A. }
+        billMonth: { type: string, example: 2026-08 }
+        amountDue: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 24750 }
+        serviceFee: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 500 }
+        vat: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 70 }
+        total: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 25320 }
+        currency: { type: string, const: EGP }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        paidAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_ERROR
+        - DECRYPTION_FAILED
+        - INSUFFICIENT_BALANCE
+        - USER_NOT_FOUND
+        - SESSION_NOT_FOUND
+        - SERVICE_NOT_FOUND
+        - SUBSCRIBER_NOT_FOUND
+        - INQUIRY_NOT_FOUND
+        - TRANSACTION_NOT_FOUND
+        - NOT_FOUND
+        - METHOD_NOT_ALLOWED
+        - BILL_ALREADY_PAID
+        - EMAIL_ALREADY_USED
+        - IDEMPOTENCY_CONFLICT
+        - INQUIRY_ALREADY_CONFIRMED
+        - SESSION_EXPIRED
+        - INQUIRY_EXPIRED
+        - INQUIRY_INVALIDATED
+        - AMOUNT_OUT_OF_RANGE
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      description: |
+        | Code | HTTP | Meaning |
+        |---|---|---|
+        | VALIDATION_ERROR | 400 | Bad input; `field` names the key (body property, query param, header, or `pin`) |
+        | DECRYPTION_FAILED | 400 | Bad blob, wrong key, tampered, stale `ts` or replayed `nonce` |
+        | INSUFFICIENT_BALANCE | 402 | Simulated decline (last digit 7) |
+        | USER_NOT_FOUND | 404 | Unknown `X-User-Id` |
+        | SESSION_NOT_FOUND | 404 | Unknown, revoked or foreign session |
+        | SERVICE_NOT_FOUND | 404 | Unknown `serviceId` |
+        | SUBSCRIBER_NOT_FOUND | 404 | No bill for that number (last digit 0) |
+        | INQUIRY_NOT_FOUND | 404 | Unknown or foreign inquiry |
+        | TRANSACTION_NOT_FOUND | 404 | Unknown or foreign transaction |
+        | NOT_FOUND | 404 | Unknown route |
+        | METHOD_NOT_ALLOWED | 405 | Wrong HTTP method |
+        | BILL_ALREADY_PAID | 409 | Nothing due (last digit 9) |
+        | EMAIL_ALREADY_USED | 409 | Profile email conflict |
+        | IDEMPOTENCY_CONFLICT | 409 | Key reused for a different inquiry |
+        | INQUIRY_ALREADY_CONFIRMED | 409 | Inquiry already has a successful or pending transaction |
+        | SESSION_EXPIRED | 410 | Session past `expiresAt` — create a new one |
+        | INQUIRY_EXPIRED | 410 | Inquiry past `expiresAt` |
+        | INQUIRY_INVALIDATED | 410 | Three wrong PINs on this inquiry |
+        | AMOUNT_OUT_OF_RANGE | 422 | `amountDue` outside the service's range (last digit 6) |
+        | RATE_LIMITED | 429 | Too many attempts; see `Retry-After` |
+        | INTERNAL_ERROR | 500 | Unexpected server error |
+        | SERVICE_UNAVAILABLE | 503 | Inactive service / simulated provider outage |
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, messageEn, messageAr, field]
+          properties:
+            code: { $ref: '#/components/schemas/ErrorCode' }
+            messageEn: { type: string, example: This inquiry has expired. }
+            messageAr: { type: string, example: انتهت صلاحية الاستعلام. }
+            field:
+              type: [string, 'null']
+              description: Offending input, when the error concerns one.
+              example: null
+
+  responses:
+    BadRequest:
+      description: '`VALIDATION_ERROR` or `DECRYPTION_FAILED`.'
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: VALIDATION_ERROR, messageEn: Invalid input., messageAr: مدخلات غير صحيحة., field: X-Client-Platform }
+    NotFound:
+      description: One of the `*_NOT_FOUND` codes.
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: USER_NOT_FOUND, messageEn: User not found., messageAr: المستخدم غير موجود., field: null }
+    Conflict:
+      description: A `409` code.
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Gone:
+      description: A `410` code.
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RateLimited:
+      description: '`RATE_LIMITED`.'
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/RequestId' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: '`SERVICE_UNAVAILABLE` — inactive service.'
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InternalError:
+      description: '`INTERNAL_ERROR`.'
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
