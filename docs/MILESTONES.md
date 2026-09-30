@@ -113,62 +113,62 @@ flowchart LR
 
 ## M1 — Platform foundations (days 3–5)
 
-- [ ] **M1 complete** (all slices done and the exit demo passed)
+- [ ] **M1 complete** (all slices done and the exit demo passed) *(all slices merged; the proxy-rejection part of the demo is on the client tracks)*
 
 **Goal:** everything that later features rely on: database, errors, headers, TLS, Docker, crypto, sessions.
 **Exit demo:** `docker compose up` → `https://api.momknpay.local/docs` loads. `POST /sessions` returns a key. A client behind mitmproxy fails to connect because of pinning.
 
-- [ ] **M1-S1 · Database schema**
-  - [ ] `V1__schema.sql` exactly as in LLD §4.1 (tables, checks, unique and partial indexes, `transaction_seq`, `updated_at` trigger).
-  - [ ] JPA entities, enums and converters (LLD §5), `ddl-auto: validate`.
-  - [ ] **Done when:** the app boots with schema validation passing, and `SchemaIT` (Testcontainers) confirms the constraints exist, including the `ux_txn_idempotency` insert-twice failure.
+- [x] **M1-S1 · Database schema**
+  - [x] `V1__schema.sql` exactly as in LLD §4.1 (tables, checks, unique and partial indexes, `transaction_seq`, `updated_at` trigger).
+  - [x] JPA entities, enums and converters (LLD §5), `ddl-auto: validate`.
+  - [x] **Done when:** the app boots with schema validation passing, and `SchemaIT` (Testcontainers) confirms the constraints exist, including the `ux_txn_idempotency` insert-twice failure.
   - Refs: NFR-REL-1…3, LLD §4–5
 
-- [ ] **M1-S2 · Seed: services and users**
-  - [ ] `V2__seed_services.sql`: 24 visible and 1 soft-deleted service (LLD §11.1).
-  - [ ] `V3__SeedUsers` Java migration with bcrypt(12) PINs (LLD §11.2).
-  - [ ] **Done when:** `SeedDataIT` passes: 3 users with working PINs, 6 categories, ≥ 24 visible services, the `_slow` and inactive services present.
+- [x] **M1-S2 · Seed: services and users**
+  - [x] `V2__seed_services.sql`: 24 visible and 1 soft-deleted service (LLD §11.1).
+  - [x] `V3__SeedUsers` Java migration with bcrypt(12) PINs (LLD §11.2).
+  - [x] **Done when:** `SeedDataIT` passes: 3 users with working PINs, 6 categories, ≥ 24 visible services, the `_slow` and inactive services present.
   - Refs: FR-SEED-1…3
 
-- [ ] **M1-S3 · Error envelope and global handler**
-  - [ ] `ErrorCode` (all 22 codes, EN/AR messages), `ApiException`, `ErrorResponse`, `GlobalExceptionHandler` with the mapping table from LLD §7.2, whitelabel page off.
-  - [ ] **Done when:** `ErrorEnvelopeIT` passes: unknown route → `NOT_FOUND`, wrong method → `METHOD_NOT_ALLOWED`, malformed JSON → `VALIDATION_ERROR`, forced exception → `INTERNAL_ERROR` with no stack trace in the body.
+- [x] **M1-S3 · Error envelope and global handler**
+  - [x] `ErrorCode` (all 22 codes, EN/AR messages), `ApiException`, `ErrorResponse`, `GlobalExceptionHandler` with the mapping table from LLD §7.2, whitelabel page off.
+  - [x] **Done when:** `ErrorEnvelopeIT` passes: unknown route → `NOT_FOUND`, wrong method → `METHOD_NOT_ALLOWED`, malformed JSON → `VALIDATION_ERROR`, forced exception → `INTERNAL_ERROR` with no stack trace in the body.
   - Refs: FR-COM-3, NFR-REL-4, NFR-SEC-10
 
-- [ ] **M1-S4 · Request ID and required headers**
-  - [ ] `RequestIdFilter` (MDC + echo), `RequiredHeadersInterceptor`, `WebConfig` `/v1` prefix, logback pattern with `requestId`.
-  - [ ] **Done when:** `HeadersIT` passes: each missing or invalid header → 400 with the right `field`. `/docs` and `/actuator/health` are exempt. Every log line shows the request ID.
+- [x] **M1-S4 · Request ID and required headers**
+  - [x] `RequestIdFilter` (MDC + echo), `RequiredHeadersInterceptor`, `WebConfig` `/v1` prefix, logback pattern with `requestId`.
+  - [x] **Done when:** `HeadersIT` passes: each missing or invalid header → 400 with the right `field`. `/docs` and `/actuator/health` are exempt. Every log line shows the request ID.
   - Refs: FR-COM-1…2, LLD §7.3–7.4, §7.7
 
 - [ ] **M1-S5 · TLS, Dockerfile and Compose**
-  - [ ] Certificate generation script or README steps (LLD §13.3), `server.ssl.*`, multi-stage Dockerfile, `docker-compose.yml` with healthchecks.
-  - [ ] Publish the **live and backup SPKI pins** to both client tracks.
-  - [ ] **Done when:** on a clean clone, `cp .env.example .env` + certs + `docker compose up` starts over HTTPS only (`http://` is refused), and the pins are posted in the contract repository.
+  - [x] Certificate generation script or README steps (LLD §13.3), `server.ssl.*`, multi-stage Dockerfile, `docker-compose.yml` with healthchecks.
+  - [ ] Publish the **live and backup SPKI pins** to both client tracks. *(pins are generated into `certs/pins.txt`; posting them is manual)*
+  - [ ] **Done when:** on a clean clone, `cp .env.example .env` + certs + `docker compose up` starts over HTTPS only (`http://` is refused), and the pins are posted in the contract repository. *(HTTPS-only Compose verified; waiting on the pins being posted)*
   - Refs: NFR-OPS-1…2, NFR-SEC-8, LLD §13
 
-- [ ] **M1-S6 · Current-user resolver**
-  - [ ] `@CurrentUser`, `UserRef`, `UserLookupService`, `CurrentUserArgumentResolver`.
-  - [ ] **Done when:** unit tests: missing `X-User-Id` → `VALIDATION_ERROR(X-User-Id)`, unknown → `USER_NOT_FOUND`, valid → `UserRef`.
+- [x] **M1-S6 · Current-user resolver**
+  - [x] `@CurrentUser`, `UserRef`, `UserLookupService`, `CurrentUserArgumentResolver`.
+  - [x] **Done when:** unit tests: missing `X-User-Id` → `VALIDATION_ERROR(X-User-Id)`, unknown → `USER_NOT_FOUND`, valid → `UserRef`. *(plus `CurrentUserIT`)*
   - Refs: FR-COM-4, LLD §7.5
 
-- [ ] **M1-S7 · AES-GCM cipher and key wrapper**
-  - [ ] `AesGcmCipher` (fresh IV per call, 128-bit tag), `KeyWrapper` with AAD = session ID, fail-fast check on `APP_MASTER_KEY`.
-  - [ ] **Done when:** U1, U2, U3 and U18 pass (round-trip, tamper, IV uniqueness, AAD binding), and startup fails with a bad master key.
+- [x] **M1-S7 · AES-GCM cipher and key wrapper**
+  - [x] `AesGcmCipher` (fresh IV per call, 128-bit tag), `KeyWrapper` with AAD = session ID, fail-fast check on `APP_MASTER_KEY`.
+  - [x] **Done when:** U1, U2, U3 and U18 pass (round-trip, tamper, IV uniqueness, AAD binding), and startup fails with a bad master key.
   - Refs: NFR-SEC-1, NFR-SEC-4, LLD §8.1–8.2
 
-- [ ] **M1-S8 · Sessions API**
-  - [ ] `SessionService.create/revoke`, `SessionController` (`POST /v1/sessions`, `DELETE /v1/sessions/{id}`), `SessionCleanupJob`.
-  - [ ] **Done when:** `SessionIT`: create → 201 with a 32-byte key. Revoke → 204, idempotent. The key is never in the logs and never readable again. Foreign session → 404.
+- [x] **M1-S8 · Sessions API**
+  - [x] `SessionService.create/revoke`, `SessionController` (`POST /v1/sessions`, `DELETE /v1/sessions/{id}`), `SessionCleanupJob`.
+  - [x] **Done when:** `SessionIT`: create → 201 with a 32-byte key. Revoke → 204, idempotent. The key is never in the logs and never readable again. Foreign session → 404.
   - Refs: FR-SES-1…5, LLD §6.1–6.2, §8.3
 
-- [ ] **M1-S9 · Payload decryptor and replay guard**
-  - [ ] `PayloadDecryptor`, `ReplayGuard` (`REQUIRES_NEW`), `NonceCleanupJob`, a `TestCrypto` helper that mirrors the clients.
-  - [ ] **Done when:** U4 and U5 pass. `SessionIT` also covers expired → `SESSION_EXPIRED`, a bad blob → `DECRYPTION_FAILED`, and a replayed nonce → `DECRYPTION_FAILED`.
+- [x] **M1-S9 · Payload decryptor and replay guard**
+  - [x] `PayloadDecryptor`, `ReplayGuard` (`REQUIRES_NEW`), `NonceCleanupJob`, a `TestCrypto` helper that mirrors the clients.
+  - [x] **Done when:** U4 and U5 pass. `SessionIT` also covers expired → `SESSION_EXPIRED`, a bad blob → `DECRYPTION_FAILED`, and a replayed nonce → `DECRYPTION_FAILED`. *(covered in `PayloadDecryptorIT`)*
   - Refs: FR-SES-2, NFR-SEC-2…3, LLD §8.4–8.5
 
-- [ ] **M1-S10 · Rate limiter**
-  - [ ] `RateLimiter`, `RateLimitInterceptor` on `/v1/sessions` and `/v1/payments/confirm`, `Retry-After` header.
-  - [ ] **Done when:** `RateLimitIT`: the sixth `POST /sessions` in a minute → 429 with `Retry-After`. A different user is unaffected.
+- [x] **M1-S10 · Rate limiter**
+  - [x] `RateLimiter`, `RateLimitInterceptor` on `/v1/sessions` and `/v1/payments/confirm`, `Retry-After` header.
+  - [x] **Done when:** `RateLimitIT`: the sixth `POST /sessions` in a minute → 429 with `Retry-After`. A different user is unaffected.
   - Refs: FR-SES-6, FR-PAY-11, NFR-SEC-9, LLD §7.6
 
 ---
