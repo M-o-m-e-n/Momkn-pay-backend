@@ -175,38 +175,38 @@ flowchart LR
 
 ## M2 — Catalogue and profile (days 6–10)
 
-- [ ] **M2 complete** (all slices done and the exit demo passed)
+- [ ] **M2 complete** (all slices done and the exit demo passed) *(all backend slices merged; the offline/search demo runs on the client apps)*
 
 **Goal:** the endpoints behind the offline-first list, search and profile screens.
 **Exit demo:** both apps do a first load, then airplane mode, cold start, and the list and search still work. Pull-to-refresh uses `sync`. Profile edit round-trips.
 
-- [ ] **M2-S1 · `GET /v1/services`**
-  - [ ] `CatalogService.getAll`, `ServiceItem` / `CatalogResponse` DTOs, a mapper, and ordering by category then `nameEn`.
-  - [ ] **Done when:** `CatalogIT`: 24 items, inactive ones included with `isActive: false`, the deleted one absent, money as integers, `syncedAt` in ISO UTC.
+- [x] **M2-S1 · `GET /v1/services`**
+  - [x] `CatalogService.getAll`, `ServiceItem` / `CatalogResponse` DTOs, a mapper, and ordering by category then `nameEn`.
+  - [x] **Done when:** `CatalogIT`: 24 items, inactive ones included with `isActive: false`, the deleted one absent, money as integers, `syncedAt` in ISO UTC.
   - Refs: FR-CAT-1…3, FR-CAT-7, LLD §6.5
 
-- [ ] **M2-S2 · `GET /v1/services/sync`**
-  - [ ] `since` parsing and validation, `>=` filters, `deletedIds`, `syncedAt` captured before the queries.
-  - [ ] **Done when:** `CatalogIT`: `since` before the seed → all rows. `since` = now → empty. Updating a row in SQL then calling sync → the row appears. The soft-deleted ID is in `deletedIds`. A bad `since` → 400 `field=since`.
+- [x] **M2-S2 · `GET /v1/services/sync`**
+  - [x] `since` parsing and validation, `>=` filters, `deletedIds`, `syncedAt` captured before the queries.
+  - [x] **Done when:** `CatalogIT`: `since` before the seed → all rows. `since` = now → empty. Updating a row in SQL then calling sync → the row appears. The soft-deleted ID is in `deletedIds`. A bad `since` → 400 `field=since`. *(`syncedAt` is returned 5 s early to absorb app/DB clock skew — see LLD §6.6)*
   - Refs: FR-CAT-4…6, LLD §6.6
 
-- [ ] **M2-S3 · `GET /v1/profile`**
-  - [ ] `ProfileService.get`, `ProfileController`, `ProfileResponse`.
-  - [ ] **Done when:** `ProfileIT`: `usr_01` returns the seeded data. Missing or unknown user → the right errors.
+- [x] **M2-S3 · `GET /v1/profile`**
+  - [x] `ProfileService.get`, `ProfileController`, `ProfileResponse`.
+  - [x] **Done when:** `ProfileIT`: `usr_01` returns the seeded data. Missing or unknown user → the right errors.
   - Refs: FR-PRO-1, LLD §6.3
 
-- [ ] **M2-S4 · `PATCH /v1/profile`**
-  - [ ] `UpdateProfileRequest` validation, trimming and lower-casing, the email uniqueness check, unknown-property rejection (`mobile`).
-  - [ ] **Done when:** `ProfileIT`: update name, update email, empty body → 400, `mobile` in the body → 400 `field=mobile`, duplicate email → 409 `EMAIL_ALREADY_USED`.
+- [x] **M2-S4 · `PATCH /v1/profile`**
+  - [x] `UpdateProfileRequest` validation, trimming and lower-casing, the email uniqueness check, unknown-property rejection (`mobile`).
+  - [x] **Done when:** `ProfileIT`: update name, update email, empty body → 400, `mobile` in the body → 400 `field=mobile`, duplicate email → 409 `EMAIL_ALREADY_USED`.
   - Refs: FR-PRO-2…5, FR-COM-5, LLD §6.4
 
-- [ ] **M2-S5 · Swagger annotations and Postman (catalogue and profile)**
-  - [ ] `@Operation` / `@ApiResponse` with examples so the generated spec matches `docs/openapi.yaml`, and the Postman folders 01–03.
-  - [ ] **Done when:** the generated `/v3/api-docs` diffs clean against the frozen spec for these endpoints, and the Postman folders run green.
+- [x] **M2-S5 · Swagger annotations and Postman (catalogue and profile)**
+  - [x] `@Operation` / `@ApiResponse` with examples so the generated spec matches `docs/openapi.yaml`, and the Postman folders 01–03.
+  - [x] **Done when:** the generated `/v3/api-docs` diffs clean against the frozen spec for these endpoints, and the Postman folders run green. *(`OpenApiContractIT` + Newman run, 9/9 assertions)*
   - Refs: NFR-DOC-1…3
 
 - [ ] **M2-S6 · Wednesday integration fixes (buffer)**
-  - [ ] Reserved for mismatches logged at the integration session. Each one is an issue, and any contract change goes through the version bump.
+  - [ ] Reserved for mismatches logged at the integration session. Each one is an issue, and any contract change goes through the version bump. *(no integration session has happened yet)*
   - [ ] **Done when:** every issue from the session is closed or scheduled.
 
 ---
