@@ -16,6 +16,7 @@ import com.momknpay.session.service.PayloadDecryptor;
 import com.momknpay.transaction.domain.Transaction;
 import com.momknpay.transaction.domain.TransactionStatus;
 import com.momknpay.transaction.repository.TransactionRepository;
+import com.momknpay.transaction.service.PendingResolver;
 import com.momknpay.transaction.service.ReferenceGenerator;
 import com.momknpay.user.domain.User;
 import com.momknpay.user.repository.UserRepository;
@@ -60,6 +61,7 @@ public class ConfirmService {
     private final PayloadDecryptor decryptor;
     private final PasswordEncoder pinEncoder;
     private final SlowServiceDelay slowDelay;
+    private final PendingResolver pendingResolver;
     private final TransactionTemplate tx;
     private final TimeProvider time;
     private final AppProperties properties;
@@ -71,6 +73,7 @@ public class ConfirmService {
             PayloadDecryptor decryptor,
             PasswordEncoder pinEncoder,
             SlowServiceDelay slowDelay,
+            PendingResolver pendingResolver,
             TransactionTemplate tx,
             TimeProvider time,
             AppProperties properties) {
@@ -80,6 +83,7 @@ public class ConfirmService {
         this.decryptor = decryptor;
         this.pinEncoder = pinEncoder;
         this.slowDelay = slowDelay;
+        this.pendingResolver = pendingResolver;
         this.tx = tx;
         this.time = time;
         this.properties = properties;
@@ -202,7 +206,7 @@ public class ConfirmService {
             return ConfirmOutcome.failed(ErrorCode.IDEMPOTENCY_CONFLICT);
         }
         log.info("payment.replayed txnId={}", transaction.getId());
-        return outcomeOf(transaction);
+        return outcomeOf(pendingResolver.resolveIfDue(transaction)); // current status
     }
 
     private static ConfirmOutcome outcomeOf(Transaction transaction) {
