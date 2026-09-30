@@ -1,0 +1,222 @@
+openapi: 3.1.0
+info:
+  title: Momkn Pay API
+  version: 1.0.0
+  summary: Simulated bill-payment API for the Momkn Pay internship capstone.
+  description: |
+    Contract shared by the backend, iOS and Android tracks. Frozen after publication:
+    any change needs an issue, sign-off from both client tracks and a version bump below.
+
+    **No authentication.** Every endpoint is public. User-scoped endpoints take the user
+    from the `X-User-Id` header (see docs/DECISIONS.md, ADR-001/002).
+
+    **Conventions**
+    - Money is integer **piastres** (`4550` = 45.50 EGP). Never floats.
+    - Timestamps are ISO 8601 UTC with second precision (`2026-09-20T10:00:00Z`).
+    - Every non-2xx response uses the `ErrorResponse` envelope. Clients switch on `error.code`.
+    - Sensitive fields (subscriber number, PIN) travel AES-256-GCM encrypted in `payload`:
+      `base64(iv[12] ‖ ciphertext ‖ tag[16])`, key = the `sessionKey` from `POST /sessions`,
+      no AAD, plaintext JSON always carries `nonce` (32 hex chars) and `ts` (unix seconds).
+      The server rejects `ts` more than 120 s from server time and any reused `nonce`.
+
+    ## Changelog
+    | Version | Date | Change |
+    |---|---|---|
+    | 1.0.0 | 2026-10-06 | Initial contract (no-auth variant of the capstone brief). |
+servers:
+  - url: https://api.momknpay.local/v1
+    description: Local (Docker Compose, self-signed certificate — pin the published SPKI hash)
+tags:
+  - name: Sessions
+    description: Crypto sessions that issue the AES-256 payload key.
+  - name: Profile
+    description: The current user's profile.
+  - name: Catalogue
+    description: Payable services and delta sync for offline-first clients.
+  - name: Payments
+    description: Fees inquiry and idempotent payment confirmation.
+  - name: Transactions
+    description: Payment history and receipts.
+
+paths: {}
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: true
+      description: Client-generated UUID, echoed back in the response and logged on every line.
+      schema: { type: string, format: uuid }
+      example: 3f6c1d2e-8a4b-4c1e-9f0a-2b7d5e6c8a91
+    ClientPlatform:
+      name: X-Client-Platform
+      in: header
+      required: true
+      schema: { type: string, enum: [ios, android] }
+    ClientVersion:
+      name: X-Client-Version
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 32 }
+      example: 1.0.0
+    UserId:
+      name: X-User-Id
+      in: header
+      required: true
+      description: The user this request acts for. Trusted as-is (no authentication).
+      schema: { type: string, maxLength: 32 }
+      example: usr_01
+    SessionId:
+      name: X-Session-Id
+      in: header
+      required: true
+      description: Session whose key encrypted `payload`. Must belong to `X-User-Id`.
+      schema: { type: string, maxLength: 40 }
+      example: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated UUID, one per payment confirmation. Repeating it returns the same
+        transaction (current status) without creating a new one.
+      schema: { type: string, format: uuid }
+      example: 6b1f0c2a-9d4e-4b7a-8c3f-1e2d3c4b5a69
+
+  headers:
+    RequestId:
+      description: Echo of the request's `X-Request-Id`.
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds until another attempt is allowed.
+      schema: { type: integer, minimum: 1 }
+
+  schemas:
+    Money:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Amount in piastres (1 EGP = 100 piastres).
+      example: 25320
+    Timestamp:
+      type: string
+      format: date-time
+      description: ISO 8601 UTC, second precision.
+      example: '2026-09-20T10:00:00Z'
+
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_ERROR
+        - DECRYPTION_FAILED
+        - INSUFFICIENT_BALANCE
+        - USER_NOT_FOUND
+        - SESSION_NOT_FOUND
+        - SERVICE_NOT_FOUND
+        - SUBSCRIBER_NOT_FOUND
+        - INQUIRY_NOT_FOUND
+        - TRANSACTION_NOT_FOUND
+        - NOT_FOUND
+        - METHOD_NOT_ALLOWED
+        - BILL_ALREADY_PAID
+        - EMAIL_ALREADY_USED
+        - IDEMPOTENCY_CONFLICT
+        - INQUIRY_ALREADY_CONFIRMED
+        - SESSION_EXPIRED
+        - INQUIRY_EXPIRED
+        - INQUIRY_INVALIDATED
+        - AMOUNT_OUT_OF_RANGE
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      description: |
+        | Code | HTTP | Meaning |
+        |---|---|---|
+        | VALIDATION_ERROR | 400 | Bad input; `field` names the key (body property, query param, header, or `pin`) |
+        | DECRYPTION_FAILED | 400 | Bad blob, wrong key, tampered, stale `ts` or replayed `nonce` |
+        | INSUFFICIENT_BALANCE | 402 | Simulated decline (last digit 7) |
+        | USER_NOT_FOUND | 404 | Unknown `X-User-Id` |
+        | SESSION_NOT_FOUND | 404 | Unknown, revoked or foreign session |
+        | SERVICE_NOT_FOUND | 404 | Unknown `serviceId` |
+        | SUBSCRIBER_NOT_FOUND | 404 | No bill for that number (last digit 0) |
+        | INQUIRY_NOT_FOUND | 404 | Unknown or foreign inquiry |
+        | TRANSACTION_NOT_FOUND | 404 | Unknown or foreign transaction |
+        | NOT_FOUND | 404 | Unknown route |
+        | METHOD_NOT_ALLOWED | 405 | Wrong HTTP method |
+        | BILL_ALREADY_PAID | 409 | Nothing due (last digit 9) |
+        | EMAIL_ALREADY_USED | 409 | Profile email conflict |
+        | IDEMPOTENCY_CONFLICT | 409 | Key reused for a different inquiry |
+        | INQUIRY_ALREADY_CONFIRMED | 409 | Inquiry already has a successful or pending transaction |
+        | SESSION_EXPIRED | 410 | Session past `expiresAt` — create a new one |
+        | INQUIRY_EXPIRED | 410 | Inquiry past `expiresAt` |
+        | INQUIRY_INVALIDATED | 410 | Three wrong PINs on this inquiry |
+        | AMOUNT_OUT_OF_RANGE | 422 | `amountDue` outside the service's range (last digit 6) |
+        | RATE_LIMITED | 429 | Too many attempts; see `Retry-After` |
+        | INTERNAL_ERROR | 500 | Unexpected server error |
+        | SERVICE_UNAVAILABLE | 503 | Inactive service / simulated provider outage |
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, messageEn, messageAr, field]
+          properties:
+            code: { $ref: '#/components/schemas/ErrorCode' }
+            messageEn: { type: string, example: This inquiry has expired. }
+            messageAr: { type: string, example: انتهت صلاحية الاستعلام. }
+            field:
+              type: [string, 'null']
+              description: Offending input, when the error concerns one.
+              example: null
+
+  responses:
+    BadRequest:
+      description: '`VALIDATION_ERROR` or `DECRYPTION_FAILED`.'
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: VALIDATION_ERROR, messageEn: Invalid input., messageAr: مدخلات غير صحيحة., field: X-Client-Platform }
+    NotFound:
+      description: One of the `*_NOT_FOUND` codes.
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: USER_NOT_FOUND, messageEn: User not found., messageAr: المستخدم غير موجود., field: null }
+    Conflict:
+      description: A `409` code.
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Gone:
+      description: A `410` code.
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RateLimited:
+      description: '`RATE_LIMITED`.'
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/RequestId' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: '`SERVICE_UNAVAILABLE` — inactive service.'
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InternalError:
+      description: '`INTERNAL_ERROR`.'
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
