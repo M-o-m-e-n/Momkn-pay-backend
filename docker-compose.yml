@@ -1,0 +1,39 @@
+# One command: `docker compose up --build` → https://api.momknpay.local/docs
+# Needs .env (copy .env.example) and certs/keystore.p12 (scripts/generate-certs.sh).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DB_HOST: db
+      TLS_KEYSTORE_PATH: /certs/keystore.p12
+    ports:
+      - "443:8443"
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -skf https://localhost:8443/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+
+volumes:
+  pgdata:
