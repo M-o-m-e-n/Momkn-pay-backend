@@ -118,7 +118,7 @@ class PayloadDecryptorIT {
     @Test
     void expiredSessionIsSessionExpired() {
         jdbc.update(
-                "UPDATE sessions SET expires_at = now() - interval '1 second' WHERE id = ?",
+                "UPDATE sessions SET expires_at = now() - interval '1 hour' WHERE id = ?",
                 session.sessionId());
         String payload =
                 encrypt(session.sessionKey(), "1024750891", TestCrypto.nonce(), TestCrypto.nowTs());
