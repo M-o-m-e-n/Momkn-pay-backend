@@ -1,0 +1,6 @@
+# Lint config for docs/openapi.yaml — run: npx @redocly/cli lint docs/openapi.yaml
+extends:
+  - recommended
+rules:
+  info-license: off                # internal teaching project, no licence
+  no-unused-components: warn       # InquiryPayload / ConfirmPayload document the encrypted plaintext
