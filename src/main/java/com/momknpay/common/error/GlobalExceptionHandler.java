@@ -1,5 +1,7 @@
 package com.momknpay.common.error;
 
+import com.momknpay.common.ratelimit.RateLimitedException;
+import com.momknpay.common.web.Headers;
 import jakarta.validation.ConstraintViolationException;
 import java.util.List;
 import org.slf4j.Logger;
@@ -38,6 +40,13 @@ public class GlobalExceptionHandler {
     ResponseEntity<ErrorResponse> handleApi(ApiException ex) {
         log.debug("api.error code={} field={}", ex.getCode(), ex.getField());
         return respond(ex.getCode(), ex.getField());
+    }
+
+    @ExceptionHandler(RateLimitedException.class)
+    ResponseEntity<ErrorResponse> handleRateLimited(RateLimitedException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(Headers.RETRY_AFTER, Long.toString(ex.getRetryAfterSeconds()))
+                .body(ErrorResponse.of(ErrorCode.RATE_LIMITED, null));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

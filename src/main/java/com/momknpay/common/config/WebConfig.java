@@ -1,5 +1,6 @@
 package com.momknpay.common.config;
 
+import com.momknpay.common.ratelimit.RateLimitInterceptor;
 import com.momknpay.common.web.RequiredHeadersInterceptor;
 import org.springframework.boot.webmvc.error.ErrorController;
 import org.springframework.context.annotation.Configuration;
@@ -18,9 +19,11 @@ public class WebConfig implements WebMvcConfigurer {
     public static final String API_PREFIX = "/v1";
 
     private final RequiredHeadersInterceptor requiredHeaders;
+    private final RateLimitInterceptor rateLimit;
 
-    public WebConfig(RequiredHeadersInterceptor requiredHeaders) {
+    public WebConfig(RequiredHeadersInterceptor requiredHeaders, RateLimitInterceptor rateLimit) {
         this.requiredHeaders = requiredHeaders;
+        this.rateLimit = rateLimit;
     }
 
     @Override
@@ -33,6 +36,10 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // order matters: a request with bad headers never consumes a rate-limit token
         registry.addInterceptor(requiredHeaders).addPathPatterns(API_PREFIX + "/**");
+        registry.addInterceptor(rateLimit)
+                .addPathPatterns(
+                        RateLimitInterceptor.SESSIONS_PATH, RateLimitInterceptor.CONFIRM_PATH);
     }
 }
