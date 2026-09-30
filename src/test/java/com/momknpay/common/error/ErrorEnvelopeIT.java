@@ -1,5 +1,6 @@
 package com.momknpay.common.error;
 
+import static com.momknpay.support.ApiRequests.withClientHeaders;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
@@ -30,19 +31,31 @@ class ErrorEnvelopeIT {
 
     @Test
     void apiExceptionUsesItsCodeAndStatus() throws Exception {
-        expectError(mvc.perform(get("/test/errors/api")), 410, "INQUIRY_EXPIRED", null)
+        expectError(
+                        mvc.perform(withClientHeaders(get("/v1/test/errors/api"))),
+                        410,
+                        "INQUIRY_EXPIRED",
+                        null)
                 .andExpect(jsonPath("$.error.messageEn").value("This inquiry has expired."))
                 .andExpect(jsonPath("$.error.messageAr").value("انتهت صلاحية الاستعلام."));
     }
 
     @Test
     void apiExceptionCarriesItsField() throws Exception {
-        expectError(mvc.perform(get("/test/errors/api-field")), 409, "EMAIL_ALREADY_USED", "email");
+        expectError(
+                mvc.perform(withClientHeaders(get("/v1/test/errors/api-field"))),
+                409,
+                "EMAIL_ALREADY_USED",
+                "email");
     }
 
     @Test
     void unexpectedExceptionIsInternalErrorWithoutDetails() throws Exception {
-        expectError(mvc.perform(get("/test/errors/boom")), 500, "INTERNAL_ERROR", null)
+        expectError(
+                        mvc.perform(withClientHeaders(get("/v1/test/errors/boom"))),
+                        500,
+                        "INTERNAL_ERROR",
+                        null)
                 .andExpect(content().string(not(containsString("secret internal detail"))))
                 .andExpect(content().string(not(containsString("IllegalStateException"))));
     }
@@ -54,7 +67,11 @@ class ErrorEnvelopeIT {
 
     @Test
     void wrongMethodIsMethodNotAllowed() throws Exception {
-        expectError(mvc.perform(delete("/test/errors/api")), 405, "METHOD_NOT_ALLOWED", null);
+        expectError(
+                mvc.perform(withClientHeaders(delete("/v1/test/errors/api"))),
+                405,
+                "METHOD_NOT_ALLOWED",
+                null);
     }
 
     @Test
@@ -79,18 +96,21 @@ class ErrorEnvelopeIT {
     @Test
     void missingHeaderIsNamedInField() throws Exception {
         expectError(
-                mvc.perform(get("/test/errors/header")), 400, "VALIDATION_ERROR", "X-Session-Id");
+                mvc.perform(withClientHeaders(get("/v1/test/errors/header"))),
+                400,
+                "VALIDATION_ERROR",
+                "X-Session-Id");
     }
 
     @Test
     void invalidQueryParameterIsNamedInField() throws Exception {
         expectError(
-                mvc.perform(get("/test/errors/param").param("size", "51")),
+                mvc.perform(withClientHeaders(get("/v1/test/errors/param")).param("size", "51")),
                 400,
                 "VALIDATION_ERROR",
                 "size");
         expectError(
-                mvc.perform(get("/test/errors/param").param("size", "abc")),
+                mvc.perform(withClientHeaders(get("/v1/test/errors/param")).param("size", "abc")),
                 400,
                 "VALIDATION_ERROR",
                 "size");
@@ -98,7 +118,9 @@ class ErrorEnvelopeIT {
 
     private ResultActions postJson(String json) throws Exception {
         return mvc.perform(
-                post("/test/errors/body").contentType(MediaType.APPLICATION_JSON).content(json));
+                withClientHeaders(post("/v1/test/errors/body"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json));
     }
 
     private static ResultActions expectError(
