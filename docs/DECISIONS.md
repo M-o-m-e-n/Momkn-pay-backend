@@ -36,6 +36,7 @@ flowchart TD
 | [007](#adr-007--add-specific-error-codes-for-the-new-failure-paths) | Add specific error codes for the new failure paths | Accepted |
 | [008](#adr-008--check-idempotency-before-decrypting) | Check idempotency before decrypting | Accepted |
 | [009](#adr-009--spring-boot-and-java-25) | Spring Boot and Java 25 | Accepted |
+| [010](#adr-010--confirm-gets-a-500-ms-latency-budget-bcrypt-stays-at-cost-12) | Confirm gets a 500 ms latency budget; bcrypt stays at cost 12 | Accepted |
 
 ---
 
@@ -253,6 +254,34 @@ Spring Boot + Java 25, PostgreSQL, Spring Data JPA, Flyway, springdoc-openapi.
 ### Consequences
 - ✅ Fits the existing environment and every backend requirement in the brief.
 - ❌ The stack is fixed for the project (brief: "pick one on day 1 and do not change it").
+
+---
+
+## ADR-010 — Confirm gets a 500 ms latency budget; bcrypt stays at cost 12
+
+**Status:** Accepted · **Date:** 2026-09-30 · **Affects:** SRS NFR-PER-1, NFR-SEC-5
+
+### Context
+The performance smoke test (M4-S3) measured every endpoint well under the 300 ms p95 budget except `POST /payments/confirm`: p50 ≈ 240 ms, p95 278–358 ms over two runs. A benchmark on the same machine showed why: one bcrypt check takes 57 ms at cost 10, 115 ms at cost 11 and **231 ms at cost 12**. The brief requires cost ≥ 12 for the PIN hash (NFR-SEC-5); the 300 ms figure is our own (NFR-PER-1).
+
+### Decision
+Keep bcrypt at cost 12. Give `POST /payments/confirm` its own p95 budget of **500 ms**; every other endpoint keeps 300 ms.
+
+### Cause
+- bcrypt is slow on purpose: the cost is what makes a stolen PIN hash expensive to brute-force, and a 4-digit PIN has only 10 000 values. Lowering the cost to meet a latency number we chose ourselves would trade a security requirement from the brief for a cosmetic one.
+- Confirm is a deliberate, once-per-payment user action behind a PIN keypad and a spinner; 250–350 ms is not noticeable there, unlike the catalogue or history, which stay fast.
+
+### Alternatives considered
+| Option | Why not chosen |
+|---|---|
+| bcrypt cost 10–11 | Breaks NFR-SEC-5 from the brief, and halves or quarters the brute-force cost of a leaked hash. |
+| Cache "PIN verified" per session | Adds state that would bypass the PIN on later payments; the brief wants the PIN on every confirmation. |
+| Argon2id | Also memory-hard and similarly slow by design; no latency gain, extra dependency. |
+
+### Consequences
+- ✅ PIN hashing keeps the strength the brief requires.
+- ❌ Confirm is the slowest non-`_slow` endpoint; CPU per confirm is ~230 ms, which also bounds throughput per core (fine at 5 confirms/min/user).
+- `scripts/perf-smoke.js` checks confirm against 500 ms and everything else against 300 ms.
 
 ---
 

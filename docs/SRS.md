@@ -351,7 +351,7 @@ Tooling endpoints (outside `/v1`, no custom headers needed): `GET /docs` (Swagge
 
 | ID | Requirement |
 |---|---|
-| NFR-PER-1 | p95 latency < 300 ms for every endpoint on a developer laptop, except `_slow` services (by design +8 s). |
+| NFR-PER-1 | p95 latency < 300 ms for every endpoint on a developer laptop, except `_slow` services (by design +8 s) and `POST /payments/confirm`, whose budget is **< 500 ms** because the bcrypt cost-12 PIN check alone takes ~230 ms (NFR-SEC-5 wins; see DECISIONS.md ADR-010). |
 | NFR-PER-2 | An 8-second `_slow` delay MUST NOT block other requests. Virtual threads are enabled. |
 | NFR-PER-3 | `GET /services` returns at least 24 services in one response, without pagination. |
 
