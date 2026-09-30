@@ -28,8 +28,9 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * The spec generated from code ({@code /v3/api-docs}) must match the frozen contract ({@code
  * docs/openapi.yaml}) for every operation implemented so far: same operations, success and error
- * status codes, header parameters, and request/response property names and leaf types (NFR-DOC-1,
- * M2-S5). Contract operations not implemented yet are listed, not failed.
+ * status codes, header, query and path parameters (and whether they are required), and
+ * request/response property names and leaf types (NFR-DOC-1, M2-S5). Contract operations not
+ * implemented yet are listed, not failed.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -55,6 +56,9 @@ class OpenApiContractIT {
         String json =
                 mvc.perform(get("/v3/api-docs")).andReturn().getResponse().getContentAsString();
         generated = objectMapper.readValue(json, Map.class);
+        // kept as a build artifact so reviewers can diff it against docs/openapi.yaml
+        Files.createDirectories(Path.of("target"));
+        Files.writeString(Path.of("target/openapi-generated.json"), json, StandardCharsets.UTF_8);
     }
 
     @Test
@@ -77,6 +81,7 @@ class OpenApiContractIT {
             }
             compareStatusCodes(key, mine, theirs, mismatches);
             compareHeaders(key, mine, theirs, mismatches);
+            compareParameters(key, mine, theirs, mismatches);
             compareBodies(key, mine, theirs, mismatches);
         }
 
@@ -108,6 +113,16 @@ class OpenApiContractIT {
         Set<String> b = headerNames(contract, theirs);
         if (!a.equals(b)) {
             out.add(op + ": headers " + a + " vs contract " + b);
+        }
+    }
+
+    /** Query and path parameters: name, location and whether they are required. */
+    private void compareParameters(
+            String op, Map<String, Object> mine, Map<String, Object> theirs, List<String> out) {
+        Set<String> a = nonHeaderParameters(generated, mine);
+        Set<String> b = nonHeaderParameters(contract, theirs);
+        if (!a.equals(b)) {
+            out.add(op + ": parameters " + a + " vs contract " + b);
         }
     }
 
@@ -217,6 +232,20 @@ class OpenApiContractIT {
             }
         }
         return names;
+    }
+
+    private static Set<String> nonHeaderParameters(
+            Map<String, Object> spec, Map<String, Object> operation) {
+        Set<String> parameters = new TreeSet<>();
+        for (Object raw : list(operation.get("parameters"))) {
+            Map<String, Object> parameter = resolve(spec, raw);
+            if (!"header".equals(parameter.get("in"))) {
+                boolean required = Boolean.TRUE.equals(parameter.get("required"));
+                parameters.add(
+                        parameter.get("in") + ":" + parameter.get("name") + (required ? "*" : ""));
+            }
+        }
+        return parameters;
     }
 
     private static Object jsonSchema(Object bodyOrResponse) {

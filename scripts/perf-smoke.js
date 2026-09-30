@@ -137,7 +137,7 @@ async function measure(name, count, concurrency, request, expectStatus) {
         const budget = `${r.budget || BUDGET_MS} ms`.padStart(6);
         console.log(`${r.name.padEnd(34)} ${String(r.n).padStart(4)} ${f(r.p50)} ${f(r.p95)} ${f(r.max)}  ${budget} ${ok ? 'OK' : 'OVER'}`);
     }
-    console.log(`\nconcurrency ${CONCURRENCY}, p95 budget ${BUDGET_MS} ms (NFR-PER-1)`);
+    console.log(`\nconcurrency ${CONCURRENCY}; budgets are for p95 (NFR-PER-1, ADR-010 for confirm)`);
     agent.destroy();
     process.exit(failed ? 1 : 0);
 })().catch((e) => {
