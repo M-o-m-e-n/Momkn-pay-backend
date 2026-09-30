@@ -101,6 +101,9 @@ Use the Maven wrapper. Integration tests (`*IT`) need Docker running (Testcontai
 | Lint the contract | `npx @redocly/cli lint docs/openapi.yaml` |
 | Postman collection against the local stack | `npx newman run postman/momknpay.postman_collection.json --insecure --env-var "baseUrl=https://localhost/v1"` |
 | After editing `postman/momkn-encrypt.js` | `node scripts/verify-postman-crypto.js && node scripts/sync-postman-crypto.js` |
+| Performance smoke test (throwaway DB) | `docker compose up -d && node scripts/perf-smoke.js && docker compose down -v` |
+| Secret scan of the git history | `docker run --rm -v "$(pwd -W):/repo" zricethezav/gitleaks:v8.30.1 git /repo --config /repo/.gitleaks.toml --redact` (Git Bash: prefix `MSYS_NO_PATHCONV=1`) |
+| Coverage report | `./mvnw verify` → `target/site/jacoco/index.html` |
 
 ## Environment notes
 

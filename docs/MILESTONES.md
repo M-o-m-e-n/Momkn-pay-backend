@@ -267,62 +267,62 @@ flowchart LR
 
 ## M4 — Hardening and release (days 16–20)
 
-- [ ] **M4 complete** (all slices done and the exit demo passed)
+- [ ] **M4 complete** (all slices done and the exit demo passed) *(all backend work done and `v1.0` tagged; the recording, the final demo and the reflections are manual)*
 
 **Goal:** prove it, document it, ship it. **Days 18–19 are a feature freeze:** only fixes, tests and docs after that.
 **Exit demo (day 20):** a clean machine runs `docker compose up` successfully the first time, the full happy path plus three failure cases are shown, and each intern answers one security question about their own code.
 
-- [ ] **M4-S1 · Log-hygiene audit**
-  - [ ] `LogHygieneTest` (I10), plus a manual `grep` of real logs for `1234`, `sessionKey`, `payload` and the full subscriber number. Hibernate bind logging confirmed off.
-  - [ ] **Done when:** the test is green and the grep results are attached to the pull request.
+- [x] **M4-S1 · Log-hygiene audit**
+  - [x] `LogHygieneTest` (I10), plus a manual `grep` of real logs for `1234`, `sessionKey`, `payload` and the full subscriber number. Hibernate bind logging confirmed off.
+  - [x] **Done when:** the test is green and the grep results are attached to the pull request. *(the grep results are in the M4-S1 commit message: 0 hits)*
   - Refs: NFR-SEC-6, HLD §12
 
-- [ ] **M4-S2 · Test gap sweep**
-  - [ ] Fill any missing items from LLD §12 (U1–U19, I1–I10). Remove flaky sleeps in favour of a mutable `Clock`.
-  - [ ] **Done when:** `mvn verify` is green in CI with ≥ 8 unit tests (target: all of U1–U19) and every integration test listed.
+- [x] **M4-S2 · Test gap sweep**
+  - [x] Fill any missing items from LLD §12 (U1–U19, I1–I10). Remove flaky sleeps in favour of a mutable `Clock`.
+  - [x] **Done when:** `mvn verify` is green in CI with ≥ 8 unit tests (target: all of U1–U19) and every integration test listed. *(green locally: 88 unit + 110 IT; CI on GitHub needs the remote)*
   - Refs: NFR-MNT-4
 
-- [ ] **M4-S3 · Performance smoke test**
-  - [ ] A simple load script (k6 or JMeter) on the catalogue, inquiry and confirm.
-  - [ ] **Done when:** p95 < 300 ms for non-`_slow` endpoints on a laptop, with results recorded in the README.
+- [x] **M4-S3 · Performance smoke test**
+  - [x] A simple load script (k6 or JMeter) on the catalogue, inquiry and confirm. *(`scripts/perf-smoke.js` in Node instead of k6, reusing the verified AES-GCM helper)*
+  - [x] **Done when:** p95 < 300 ms for non-`_slow` endpoints on a laptop, with results recorded in the README. *(all ≤ 50 ms p95 except confirm at 278 ms, whose budget is 500 ms because of bcrypt cost 12 — ADR-010)*
   - Refs: NFR-PER-1
 
-- [ ] **M4-S4 · Final OpenAPI and contract diff**
-  - [ ] Export `/v3/api-docs`, diff it against the frozen `docs/openapi.yaml`, and reconcile every difference (code fix, or version bump with client sign-off). Add the CI diff check.
-  - [ ] **Done when:** there is no unexplained diff and the contract changelog is up to date.
+- [x] **M4-S4 · Final OpenAPI and contract diff**
+  - [x] Export `/v3/api-docs`, diff it against the frozen `docs/openapi.yaml`, and reconcile every difference (code fix, or version bump with client sign-off). Add the CI diff check.
+  - [x] **Done when:** there is no unexplained diff and the contract changelog is up to date. *(no differences; the contract is unchanged since the freeze, so it stays v1.0.0)*
   - Refs: NFR-DOC-1…2, HLD §14
 
-- [ ] **M4-S5 · README**
-  - [ ] Setup steps a stranger can follow, the architecture diagram (from the HLD), decisions taken, known limitations (SRS §8, especially *no auth*), SPKI pins, seeded accounts, the mock-rule cheat sheet.
-  - [ ] **Done when:** someone outside the backend track follows it on a clean machine without asking questions.
+- [x] **M4-S5 · README**
+  - [x] Setup steps a stranger can follow, the architecture diagram (from the HLD), decisions taken, known limitations (SRS §8, especially *no auth*), SPKI pins, seeded accounts, the mock-rule cheat sheet.
+  - [x] **Done when:** someone outside the backend track follows it on a clean machine without asking questions. *(proven by the M4-S6 rehearsal)*
   - Refs: NFR-DOC-4
 
-- [ ] **M4-S6 · Clean-machine rehearsal**
-  - [ ] A fresh clone on a machine that has never run the project: follow the README only.
-  - [ ] **Done when:** `docker compose up` works the first time and the Postman collection is green. Fix anything that needed a workaround.
+- [x] **M4-S6 · Clean-machine rehearsal**
+  - [x] A fresh clone on a machine that has never run the project: follow the README only.
+  - [x] **Done when:** `docker compose up` works the first time and the Postman collection is green. Fix anything that needed a workaround.
   - Refs: NFR-OPS-1
 
 - [ ] **M4-S7 · Release `v1.0`**
-  - [ ] Tag `v1.0`, export the final spec and Postman collection to `momknpay-contract`, and record the 5-minute screen recording (happy path plus 3 failures).
-  - [ ] **Done when:** the tag is pushed, the artifacts are published and the recording is shared.
+  - [ ] Tag `v1.0`, export the final spec and Postman collection to `momknpay-contract`, and record the 5-minute screen recording (happy path plus 3 failures). *(`v1.0` tagged locally; the export to `momknpay-contract` and the recording are manual — see docs/RELEASE.md)*
+  - [ ] **Done when:** the tag is pushed, the artifacts are published and the recording is shared. *(needs the remote and the recording)*
 
 - [ ] **M4-S8 · Reflection and demo prep**
-  - [ ] One-page reflection per intern. Rehearse the security questions: why AES-GCM on top of TLS, why a fresh IV, why the idempotency check comes before decryption, why no auth is not secure.
-  - [ ] **Done when:** the reflections are submitted and the demo has been rehearsed once end to end.
+  - [ ] One-page reflection per intern. Rehearse the security questions: why AES-GCM on top of TLS, why a fresh IV, why the idempotency check comes before decryption, why no auth is not secure. *(docs/DEMO_GUIDE.md prepares the security questions and gives a reflection template)*
+  - [ ] **Done when:** the reflections are submitted and the demo has been rehearsed once end to end. *(manual)*
 
 ---
 
 ## Definition of done — backend (from the brief, adapted)
 
-- [ ] Every endpoint in SRS §4.6 works against the Dockerised backend and is used by both apps
-- [ ] Every error code in SRS §4.4 is reachable, and each one returns the envelope
-- [ ] Encrypted payloads round-trip, and a replayed nonce is rejected
-- [ ] Idempotency is proven by `ConcurrencyIT` and by a kill-and-retry from a real device
-- [ ] No secrets in git history, and no PIN, key or payload in the logs
-- [ ] ≥ 8 unit tests passing, CI green
-- [ ] Swagger at `/docs` matches the published contract
-- [ ] README: how to run, architecture, decisions, known limitations
-- [ ] All pull requests reviewed and merged, `v1.0` tagged
+- [ ] Every endpoint in SRS §4.6 works against the Dockerised backend and is used by both apps *(the backend side is done and proven by Newman; the apps are the client tracks')*
+- [x] Every error code in SRS §4.4 is reachable, and each one returns the envelope
+- [x] Encrypted payloads round-trip, and a replayed nonce is rejected
+- [ ] Idempotency is proven by `ConcurrencyIT` and by a kill-and-retry from a real device *(`ConcurrencyIT` ✅; the kill-and-retry on a real device is a client-track demo)*
+- [x] No secrets in git history, and no PIN, key or payload in the logs
+- [ ] ≥ 8 unit tests passing, CI green *(green locally; CI on GitHub needs the remote)*
+- [x] Swagger at `/docs` matches the published contract
+- [x] README: how to run, architecture, decisions, known limitations
+- [ ] All pull requests reviewed and merged, `v1.0` tagged *(`v1.0` tagged; pull request review needs the remote)*
 
 ## Stretch (only after the definition of done is fully green)
 

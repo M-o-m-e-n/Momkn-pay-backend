@@ -350,3 +350,6 @@ The contract is [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). It is mi
 | [Milestones](docs/MILESTONES.md) | Delivery plan and progress |
 | [Decisions](docs/DECISIONS.md) | Why things are the way they are |
 | [OpenAPI contract](docs/openapi.yaml) | The frozen API contract |
+| [Release notes](docs/RELEASE.md) | Clean-machine rehearsal and release checklist |
+| [Demo guide](docs/DEMO_GUIDE.md) | Demo runbook, security Q&A, reflection template |
+| [Changelog](CHANGELOG.md) | What changed in each version |
