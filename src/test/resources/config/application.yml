@@ -4,3 +4,4 @@ app:
   master-key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
   rate-limit:
     per-minute: 1000   # generous so shared-context ITs never collide; RateLimitIT sets 5
+  slow-delay: PT0.2S   # keeps _slow tests fast; production default is PT8S
