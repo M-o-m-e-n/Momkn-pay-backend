@@ -2,3 +2,5 @@
 app:
   # fixed test key: base64 of bytes 0x00..0x1f — NOT a secret, only valid in tests
   master-key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+  rate-limit:
+    per-minute: 1000   # generous so shared-context ITs never collide; RateLimitIT sets 5
