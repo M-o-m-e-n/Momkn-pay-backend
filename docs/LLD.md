@@ -88,7 +88,7 @@ com.momknpay
 │   ├── config        WebConfig, JacksonConfig, ClockConfig, OpenApiConfig, SchedulingConfig, AppProperties
 │   ├── error         ErrorCode, ApiException, ErrorResponse, GlobalExceptionHandler
 │   ├── web           RequestIdFilter, RequiredHeadersInterceptor, RateLimitInterceptor,
-│   │                 CurrentUser (annotation), UserRef, CurrentUserArgumentResolver, Headers
+│   │                 CurrentUser (annotation), UserRef, Headers
 │   ├── crypto        AesGcmCipher, KeyWrapper, SecureRandoms
 │   ├── ratelimit     RateLimiter, RateLimitPolicy
 │   └── util          IdGenerator, TimeProvider, Masking
@@ -96,7 +96,8 @@ com.momknpay
 │   ├── domain        User
 │   ├── repository    UserRepository
 │   ├── service       ProfileService, UserLookupService
-│   └── web           ProfileController, dto/{ProfileResponse, UpdateProfileRequest}
+│   └── web           ProfileController, CurrentUserArgumentResolver, UserWebConfig,
+│                     dto/{ProfileResponse, UpdateProfileRequest}
 ├── session
 │   ├── domain        Session, UsedNonce
 │   ├── repository    SessionRepository, UsedNonceRepository
@@ -817,7 +818,7 @@ The cache is a Caffeine cache (`expireAfterAccess 10 min`). Without an `X-User-I
 ```java
 configurePathMatch: addPathPrefix("/v1", HandlerTypePredicate.forBasePackage("com.momknpay"))
 addInterceptors:   RequiredHeadersInterceptor → "/v1/**"; RateLimitInterceptor → "/v1/sessions", "/v1/payments/confirm"
-addArgumentResolvers: CurrentUserArgumentResolver
+(CurrentUserArgumentResolver is registered by user.web.UserWebConfig, so common never depends on a feature package)
 ```
 
 ### 7.8 `Masking`
