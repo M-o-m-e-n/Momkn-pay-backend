@@ -57,6 +57,22 @@ The contract is [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1), mirrored
   Encrypted payloads come from `postman/momkn-encrypt.js` (AES-256-GCM in plain JavaScript, because the Postman sandbox has none).
   After editing it: `node scripts/verify-postman-crypto.js && node scripts/sync-postman-crypto.js`.
 
+## Performance
+
+`node scripts/perf-smoke.js` measures p50/p95/max per endpoint against a running stack (it writes payments, so use a throwaway database: `docker compose up -d`, run it, then `docker compose down -v`). Latest run on a developer laptop (Docker Desktop, 16 vCPU), 200 requests per endpoint at concurrency 10:
+
+| Endpoint | p50 ms | p95 ms | Budget |
+|---|---|---|---|
+| `GET /services` | 9.8 | 16.6 | 300 |
+| `GET /services/sync` | 9.3 | 12.3 | 300 |
+| `GET /profile` | 6.9 | 10.4 | 300 |
+| `GET /payments/transactions` | 13.0 | 22.5 | 300 |
+| `GET /payments/transactions/{id}` | 16.4 | 35.6 | 300 |
+| `POST /payments/inquiry` | 29.6 | 50.3 | 300 |
+| `POST /payments/confirm` (10 samples, rate-limited) | 239.9 | 277.5 | 500 |
+
+Confirm is dominated by the bcrypt cost-12 PIN check (~230 ms by itself) — a deliberate security cost, see [ADR-010](docs/DECISIONS.md).
+
 ## Contributing
 
 - `main` is protected: every change goes through a pull request with one peer and one mentor approval, and a green CI check.
