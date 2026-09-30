@@ -46,6 +46,7 @@ springdoc:
     path: /docs
   api-docs:
     path: /v3/api-docs
+  paths-to-match: /v1/**                 # only the API, not /error or actuator
 
 management:
   endpoints:

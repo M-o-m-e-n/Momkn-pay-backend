@@ -1,0 +1,7 @@
+# Use this workspace to collaborate
+workspace:
+  id: b611652b-5dee-4841-8a96-152d9563b5b0
+
+localResources:
+  collections:
+    - ../momknpay.postman_collection.json

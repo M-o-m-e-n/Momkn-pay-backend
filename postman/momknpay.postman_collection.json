@@ -241,7 +241,24 @@
               "mode": "raw",
               "raw": "{\n  \"fullName\": \"Mina Adel\",\n  \"email\": \"mina@example.com\"\n}"
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 with the updated profile', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.fullName).to.eql('Mina Adel');",
+                  "  pm.expect(body.email).to.eql('mina@example.com');",
+                  "  pm.expect(body.mobile).to.eql('01000000001');",
+                  "});"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Update profile — mobile is read-only (400)",
@@ -436,7 +453,23 @@
                 }
               ]
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 delta envelope', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.all.keys('syncedAt', 'items', 'deletedIds');",
+                  "  pm.collectionVariables.set('syncedAt', body.syncedAt);",
+                  "});"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Sync services — bad since (400)",
