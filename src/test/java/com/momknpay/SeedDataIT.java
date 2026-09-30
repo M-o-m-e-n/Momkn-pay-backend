@@ -91,4 +91,27 @@ class SeedDataIT {
     private String pinHashOf(String userId) {
         return jdbc.queryForObject("SELECT pin_hash FROM users WHERE id = ?", String.class, userId);
     }
+
+    @Test
+    void usr01HasSeededHistoryAndUsr02HasNone() {
+        List<String> statuses =
+                jdbc.queryForList(
+                        "SELECT status FROM transactions WHERE id BETWEEN 'txn_5500' AND 'txn_5505'"
+                                + " AND user_id = 'usr_01' ORDER BY seq",
+                        String.class);
+        Integer inconsistent =
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM transactions t JOIN inquiries i ON i.id ="
+                            + " t.inquiry_id WHERE t.total <> i.total OR t.user_id <> i.user_id",
+                        Integer.class);
+
+        assertThat(statuses)
+                .containsExactly("SUCCESS", "SUCCESS", "FAILED", "SUCCESS", "SUCCESS", "SUCCESS");
+        assertThat(inconsistent).isZero();
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM transactions WHERE user_id = 'usr_02'",
+                                Integer.class))
+                .isZero();
+    }
 }
