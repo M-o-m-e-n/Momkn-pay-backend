@@ -61,6 +61,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CreateSessionResponse' }
+              example:
+                sessionId: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60
+                sessionKey: q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=
+                expiresAt: '2026-09-20T10:30:00Z'
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -106,6 +110,12 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Profile' }
+              example:
+                id: usr_01
+                fullName: Mina Adel
+                mobile: '01000000001'
+                email: mina@example.com
+                memberSince: '2026-09-01T09:00:00Z'
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -133,6 +143,12 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Profile' }
+              example:
+                id: usr_01
+                fullName: Mina Adel
+                mobile: '01000000001'
+                email: mina@example.com
+                memberSince: '2026-09-01T09:00:00Z'
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -155,6 +171,31 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CatalogResponse' }
+              example:
+                syncedAt: '2026-09-20T10:00:00Z'
+                items:
+                  - id: svc_elec_cairo
+                    nameEn: Cairo Electricity
+                    nameAr: كهرباء القاهرة
+                    category: electricity
+                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    inputLabel: Subscriber number
+                    inputPattern: '^[0-9]{10}$'
+                    minAmount: 500
+                    maxAmount: 500000
+                    isActive: true
+                    updatedAt: '2026-09-18T09:00:00Z'
+                  - id: svc_elec_alex
+                    nameEn: Alexandria Electricity
+                    nameAr: كهرباء الإسكندرية
+                    category: electricity
+                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    inputLabel: Subscriber number
+                    inputPattern: '^[0-9]{10}$'
+                    minAmount: 500
+                    maxAmount: 500000
+                    isActive: false
+                    updatedAt: '2026-09-18T09:00:00Z'
         '400': { $ref: '#/components/responses/BadRequest' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -181,7 +222,228 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SyncResponse' }
+              example:
+                syncedAt: '2026-09-20T12:00:00Z'
+                items:
+                  - id: svc_elec_cairo
+                    nameEn: Cairo Electricity
+                    nameAr: كهرباء القاهرة
+                    category: electricity
+                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    inputLabel: Subscriber number
+                    inputPattern: '^[0-9]{10}$'
+                    minAmount: 500
+                    maxAmount: 500000
+                    isActive: true
+                    updatedAt: '2026-09-18T09:00:00Z'
+                deletedIds: [svc_water_legacy]
         '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /payments/inquiry:
+    post:
+      tags: [Payments]
+      operationId: createInquiry
+      summary: Fees inquiry for a subscriber (encrypted subscriber number)
+      description: |
+        `payload` decrypts to `InquiryPayload`. The quote is valid for 5 minutes (`expiresAt`).
+
+        **Mock rules (last digit of the subscriber number):** 0 → `SUBSCRIBER_NOT_FOUND`;
+        1–5 → normal bill (`amountDue` = digits 3–7, at least `minAmount`); 6 → bill above
+        `maxAmount` (confirm will fail with `AMOUNT_OUT_OF_RANGE`); 7 → confirm declines with
+        `INSUFFICIENT_BALANCE`; 8 → confirm returns `PENDING`, `SUCCESS` after 10 s;
+        9 → `BILL_ALREADY_PAID`. Services whose id ends in `_slow` respond after 8 s.
+        Inactive services → `SERVICE_UNAVAILABLE`.
+
+        **Fees (piastres, rounded up):** `serviceFee = max(500, ceil(0.005 × amountDue))`,
+        `vat = ceil(0.14 × serviceFee)`, `total = amountDue + serviceFee + vat`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InquiryRequest' }
+      responses:
+        '200':
+          description: Quote.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InquiryResponse' }
+              example:
+                inquiryId: inq_8f21a0c4d9e7b312
+                serviceId: svc_elec_cairo
+                customerName: Mina A.
+                billMonth: 2026-08
+                amountDue: 24750
+                serviceFee: 500
+                vat: 70
+                total: 25320
+                currency: EGP
+                expiresAt: '2026-09-20T10:05:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /payments/confirm:
+    post:
+      tags: [Payments]
+      operationId: confirmPayment
+      summary: Pay an open inquiry with the PIN (encrypted, idempotent)
+      description: |
+        `payload` decrypts to `ConfirmPayload`. The server checks `Idempotency-Key` **before**
+        decrypting: a repeated key returns the same transaction (with its current status) and
+        never creates a second one — the retry may resend the exact same bytes.
+
+        Wrong PIN → `VALIDATION_ERROR` with `field: "pin"`; the third wrong PIN on an inquiry
+        invalidates it (`INQUIRY_INVALIDATED` afterwards). Rate-limited to 5 per minute per user.
+        A declined payment is recorded as a `FAILED` transaction and returned as
+        `INSUFFICIENT_BALANCE`; the inquiry stays open for a retry with a new key.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmRequest' }
+      responses:
+        '200':
+          description: '`SUCCESS` or `PENDING` — first call and replays alike.'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmResponse' }
+              example:
+                transactionId: txn_5521
+                status: SUCCESS
+                reference: MP-20260920-5521
+                paidAt: '2026-09-20T10:02:11Z'
+                total: 25320
+                service: { id: svc_elec_cairo, nameEn: Cairo Electricity, nameAr: كهرباء القاهرة }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402':
+          description: '`INSUFFICIENT_BALANCE` (simulated decline).'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '422':
+          description: '`AMOUNT_OUT_OF_RANGE`.'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /payments/transactions:
+    get:
+      tags: [Transactions]
+      operationId: listTransactions
+      summary: The user's transactions, newest first
+      description: '`PENDING` rows whose 10 s have passed are reported as `SUCCESS`.'
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: One page.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionPage' }
+              example:
+                items:
+                  - transactionId: txn_5521
+                    status: SUCCESS
+                    reference: MP-20260920-5521
+                    total: 25320
+                    createdAt: '2026-09-20T10:02:11Z'
+                    paidAt: '2026-09-20T10:02:11Z'
+                    failureCode: null
+                    service: { id: svc_elec_cairo, nameEn: Cairo Electricity, nameAr: كهرباء القاهرة, category: electricity }
+                  - transactionId: txn_5519
+                    status: FAILED
+                    reference: MP-20260920-5519
+                    total: 14830
+                    createdAt: '2026-09-20T09:48:00Z'
+                    paidAt: null
+                    failureCode: INSUFFICIENT_BALANCE
+                    service: { id: svc_water_cairo, nameEn: Greater Cairo Water, nameAr: مياه القاهرة الكبرى, category: water }
+                page: 0
+                size: 20
+                totalItems: 2
+                totalPages: 1
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /payments/transactions/{id}:
+    get:
+      tags: [Transactions]
+      operationId: getReceipt
+      summary: Full receipt of one transaction
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, maxLength: 32 }
+          example: txn_5521
+      responses:
+        '200':
+          description: Receipt.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+              example:
+                transactionId: txn_5521
+                inquiryId: inq_8f21a0c4d9e7b312
+                status: SUCCESS
+                failureCode: null
+                reference: MP-20260920-5521
+                service: { id: svc_elec_cairo, nameEn: Cairo Electricity, nameAr: كهرباء القاهرة, category: electricity }
+                subscriberNumber: '1024750891'
+                customerName: Mina A.
+                billMonth: 2026-08
+                amountDue: 24750
+                serviceFee: 500
+                vat: 70
+                total: 25320
+                currency: EGP
+                createdAt: '2026-09-20T10:02:11Z'
+                paidAt: '2026-09-20T10:02:11Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
 components:
@@ -321,6 +583,147 @@ components:
           type: array
           items: { type: string }
           example: [svc_water_legacy]
+
+    EncryptedPayload:
+      type: string
+      format: byte
+      maxLength: 4096
+      description: base64( iv[12] ‖ AES-256-GCM ciphertext ‖ tag[16] ), fresh IV per message.
+      example: AAECAwQFBgcICQoLjXq9mWQ2Zx0fYk1c3gUqvLw7r0E=
+    InquiryRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceId, payload]
+      properties:
+        serviceId: { type: string, maxLength: 64, example: svc_elec_cairo }
+        payload: { $ref: '#/components/schemas/EncryptedPayload' }
+    InquiryPayload:
+      type: object
+      description: Plaintext inside `InquiryRequest.payload` (never sent unencrypted).
+      required: [subscriberNumber, nonce, ts]
+      properties:
+        subscriberNumber: { type: string, example: '1024750891' }
+        nonce: { type: string, pattern: '^[0-9a-f]{32}$', example: 7f3a9c0e1b2d4f6a8c0e2b4d6f8a0c1e }
+        ts: { type: integer, format: int64, description: Unix seconds, example: 1790000000 }
+    InquiryResponse:
+      type: object
+      required: [inquiryId, serviceId, customerName, billMonth, amountDue, serviceFee, vat, total, currency, expiresAt]
+      properties:
+        inquiryId: { type: string, example: inq_8f21a0c4d9e7b312 }
+        serviceId: { type: string, example: svc_elec_cairo }
+        customerName: { type: string, example: Mina A. }
+        billMonth: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$', example: 2026-08 }
+        amountDue: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 24750 }
+        serviceFee: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 500 }
+        vat: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 70 }
+        total: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 25320 }
+        currency: { type: string, const: EGP }
+        expiresAt: { $ref: '#/components/schemas/Timestamp' }
+
+    ConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [inquiryId, payload]
+      properties:
+        inquiryId: { type: string, maxLength: 32, example: inq_8f21a0c4d9e7b312 }
+        payload: { $ref: '#/components/schemas/EncryptedPayload' }
+    ConfirmPayload:
+      type: object
+      description: Plaintext inside `ConfirmRequest.payload`. The PIN is never stored or logged.
+      required: [pin, nonce, ts]
+      properties:
+        pin: { type: string, pattern: '^[0-9]{4}$', example: '1234' }
+        nonce: { type: string, pattern: '^[0-9a-f]{32}$', example: 0a1b2c3d4e5f60718293a4b5c6d7e8f9 }
+        ts: { type: integer, format: int64, example: 1790000060 }
+    TransactionStatus:
+      type: string
+      enum: [SUCCESS, FAILED, PENDING]
+    ServiceRef:
+      type: object
+      required: [id, nameEn, nameAr]
+      properties:
+        id: { type: string, example: svc_elec_cairo }
+        nameEn: { type: string, example: Cairo Electricity }
+        nameAr: { type: string, example: كهرباء القاهرة }
+    ServiceSummary:
+      allOf:
+        - $ref: '#/components/schemas/ServiceRef'
+        - type: object
+          required: [category]
+          properties:
+            category: { $ref: '#/components/schemas/ServiceCategory' }
+    ConfirmResponse:
+      type: object
+      required: [transactionId, status, reference, paidAt, total, service]
+      properties:
+        transactionId: { type: string, example: txn_5521 }
+        status: { $ref: '#/components/schemas/TransactionStatus' }
+        reference: { type: string, pattern: '^MP-[0-9]{8}-[0-9]{4,}$', example: MP-20260920-5521 }
+        paidAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+          description: '`null` while `PENDING`.'
+        total: { $ref: '#/components/schemas/Money' }
+        service: { $ref: '#/components/schemas/ServiceRef' }
+
+    TransactionItem:
+      type: object
+      required: [transactionId, status, reference, total, createdAt, paidAt, failureCode, service]
+      properties:
+        transactionId: { type: string, example: txn_5521 }
+        status: { $ref: '#/components/schemas/TransactionStatus' }
+        reference: { type: string, example: MP-20260920-5521 }
+        total: { $ref: '#/components/schemas/Money' }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        paidAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        failureCode:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorCode'
+            - type: 'null'
+          description: Set only when `status` is `FAILED`.
+        service: { $ref: '#/components/schemas/ServiceSummary' }
+    TransactionPage:
+      type: object
+      required: [items, page, size, totalItems, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TransactionItem' }
+        page: { type: integer, example: 0 }
+        size: { type: integer, example: 20 }
+        totalItems: { type: integer, format: int64, example: 6 }
+        totalPages: { type: integer, example: 1 }
+    Receipt:
+      type: object
+      required: [transactionId, inquiryId, status, failureCode, reference, service, subscriberNumber, customerName,
+                 billMonth, amountDue, serviceFee, vat, total, currency, createdAt, paidAt]
+      properties:
+        transactionId: { type: string, example: txn_5521 }
+        inquiryId: { type: string, example: inq_8f21a0c4d9e7b312 }
+        status: { $ref: '#/components/schemas/TransactionStatus' }
+        failureCode:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorCode'
+            - type: 'null'
+        reference: { type: string, example: MP-20260920-5521 }
+        service: { $ref: '#/components/schemas/ServiceSummary' }
+        subscriberNumber: { type: string, example: '1024750891' }
+        customerName: { type: string, example: Mina A. }
+        billMonth: { type: string, example: 2026-08 }
+        amountDue: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 24750 }
+        serviceFee: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 500 }
+        vat: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 70 }
+        total: { allOf: [{ $ref: '#/components/schemas/Money' }], example: 25320 }
+        currency: { type: string, const: EGP }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        paidAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
 
     ErrorCode:
       type: string
