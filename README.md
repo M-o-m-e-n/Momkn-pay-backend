@@ -30,6 +30,14 @@ docker run -d --name momknpay-db -e POSTGRES_DB=momknpay -e POSTGRES_USER=momknp
 DB_PASSWORD=change-me ./mvnw spring-boot:run
 ```
 
+## Contributing
+
+- `main` is protected: every change goes through a pull request with one peer and one mentor approval, and a green CI check.
+- One slice (see [Milestones](docs/MILESTONES.md)) = one branch = one pull request, at most ~400 changed lines.
+- Branches: `feature/<slice-id>-<short-name>` (e.g. `feature/M1-S3-error-envelope`) or `fix/<ticket>-<short-name>`.
+- Commits follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`, for example `feat(payment): return stored transaction for repeated idempotency key`. Scope is the feature package: `payment`, `session`, `catalog`, `user`, `transaction`, `common`.
+- Run `./mvnw spotless:apply` before committing; `./mvnw verify` must pass.
+
 ## Documentation
 
 | Document | Purpose |
