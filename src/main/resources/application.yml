@@ -52,3 +52,14 @@ management:
     web:
       exposure:
         include: health
+
+app:
+  master-key: ${APP_MASTER_KEY:}              # required: base64 of 32 bytes, startup fails without it
+  session-ttl: ${APP_SESSION_TTL:PT30M}
+  inquiry-ttl: ${APP_INQUIRY_TTL:PT5M}
+  replay-window: ${APP_REPLAY_WINDOW:PT120S}
+  nonce-retention: PT5M
+  slow-delay: ${APP_SLOW_DELAY:PT8S}
+  pending-delay: ${APP_PENDING_DELAY:PT10S}
+  rate-limit:
+    per-minute: 5
