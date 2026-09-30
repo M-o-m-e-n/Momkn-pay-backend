@@ -23,6 +23,8 @@ info:
     | Version | Date | Change |
     |---|---|---|
     | 1.0.0 | 2026-10-06 | Initial contract (no-auth variant of the capstone brief). |
+# Deliberately public: no security schemes (ADR-001).
+security: []
 servers:
   - url: https://api.momknpay.local/v1
     description: Local (Docker Compose, self-signed certificate — pin the published SPKI hash)
@@ -38,7 +40,149 @@ tags:
   - name: Transactions
     description: Payment history and receipts.
 
-paths: {}
+paths:
+  /sessions:
+    post:
+      tags: [Sessions]
+      operationId: createSession
+      summary: Create a crypto session and receive the AES-256 payload key
+      description: |
+        Returns a fresh 32-byte key (base64) valid for 30 minutes. The key is returned **only here**;
+        keep it in memory, never on disk. Rate-limited to 5 per minute per user.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '201':
+          description: Session created.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateSessionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /sessions/{sessionId}:
+    delete:
+      tags: [Sessions]
+      operationId: revokeSession
+      summary: Revoke a session (the key stops working immediately)
+      description: Idempotent — revoking an already revoked session also returns 204.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '204':
+          description: Revoked.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /profile:
+    get:
+      tags: [Profile]
+      operationId: getProfile
+      summary: Current user's profile
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Profile.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Profile]
+      operationId: updateProfile
+      summary: Update full name and/or email (mobile is read-only)
+      description: |
+        At least one field is required. Any other property — including `mobile` — is rejected
+        with `VALIDATION_ERROR` naming it. Duplicate email → `EMAIL_ALREADY_USED`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProfileRequest' }
+      responses:
+        '200':
+          description: Updated profile.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /services:
+    get:
+      tags: [Catalogue]
+      operationId: listServices
+      summary: Full catalogue (inactive services included, deleted ones excluded)
+      description: Store `syncedAt` and send it as `since` on the next `/services/sync`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+      responses:
+        '200':
+          description: Catalogue snapshot.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /services/sync:
+    get:
+      tags: [Catalogue]
+      operationId: syncServices
+      summary: Services changed or deleted at or after `since`
+      description: |
+        At-least-once: the filter is `>= since` (second precision), so a boundary row can arrive
+        twice. Clients upsert `items` and delete `deletedIds`.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+        - name: since
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+      responses:
+        '200':
+          description: Delta.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
 components:
   parameters:
@@ -104,6 +248,79 @@ components:
       format: date-time
       description: ISO 8601 UTC, second precision.
       example: '2026-09-20T10:00:00Z'
+
+    CreateSessionResponse:
+      type: object
+      required: [sessionId, sessionKey, expiresAt]
+      properties:
+        sessionId: { type: string, example: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60 }
+        sessionKey:
+          type: string
+          format: byte
+          description: base64 of 32 random bytes (AES-256 key). Memory only on the client.
+          example: q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=
+        expiresAt: { $ref: '#/components/schemas/Timestamp' }
+
+    Profile:
+      type: object
+      required: [id, fullName, mobile, email, memberSince]
+      properties:
+        id: { type: string, example: usr_01 }
+        fullName: { type: string, example: Mina Adel }
+        mobile: { type: string, pattern: '^01[0125][0-9]{8}$', example: '01000000001' }
+        email: { type: string, format: email, example: mina@example.com }
+        memberSince: { $ref: '#/components/schemas/Timestamp' }
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        fullName: { type: string, minLength: 2, maxLength: 100, example: Mina Adel Fawzy }
+        email: { type: string, format: email, maxLength: 254, example: mina.adel@example.com }
+
+    ServiceCategory:
+      type: string
+      enum: [electricity, water, gas, internet, mobile, landline]
+    ServiceItem:
+      type: object
+      required: [id, nameEn, nameAr, category, iconUrl, inputLabel, inputPattern, minAmount, maxAmount, isActive, updatedAt]
+      properties:
+        id: { type: string, example: svc_elec_cairo }
+        nameEn: { type: string, example: Cairo Electricity }
+        nameAr: { type: string, example: كهرباء القاهرة }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        iconUrl: { type: string, format: uri, example: 'https://cdn.momknpay.local/icons/electricity.png' }
+        inputLabel: { type: string, example: Subscriber number }
+        inputPattern:
+          type: string
+          description: Regular expression the subscriber number must match (validate client-side too).
+          example: '^[0-9]{10}$'
+        minAmount: { $ref: '#/components/schemas/Money' }
+        maxAmount: { $ref: '#/components/schemas/Money' }
+        isActive:
+          type: boolean
+          description: Inactive services are shown disabled, never hidden.
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    CatalogResponse:
+      type: object
+      required: [syncedAt, items]
+      properties:
+        syncedAt: { $ref: '#/components/schemas/Timestamp' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ServiceItem' }
+    SyncResponse:
+      type: object
+      required: [syncedAt, items, deletedIds]
+      properties:
+        syncedAt: { $ref: '#/components/schemas/Timestamp' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ServiceItem' }
+        deletedIds:
+          type: array
+          items: { type: string }
+          example: [svc_water_legacy]
 
     ErrorCode:
       type: string
