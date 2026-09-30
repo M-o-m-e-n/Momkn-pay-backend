@@ -52,6 +52,10 @@ The contract is [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1), mirrored
 - **Frozen** since day 3. A change needs an issue, sign-off from both client tracks, and a new row in the changelog inside `info.description` with a version bump.
 - Lint: `npx @redocly/cli lint docs/openapi.yaml`
 - Mock server for client teams (no backend needed): `npx @stoplight/prism-cli mock docs/openapi.yaml` → `http://127.0.0.1:4010`
+- Postman collection: every endpoint and every mock rule (folders 01–06). Run it against the local stack with
+  `npx newman run postman/momknpay.postman_collection.json --insecure --env-var "baseUrl=https://localhost/v1"`.
+  Encrypted payloads come from `postman/momkn-encrypt.js` (AES-256-GCM in plain JavaScript, because the Postman sandbox has none).
+  After editing it: `node scripts/verify-postman-crypto.js && node scripts/sync-postman-crypto.js`.
 
 ## Contributing
 

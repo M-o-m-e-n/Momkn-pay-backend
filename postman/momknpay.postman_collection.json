@@ -37,6 +37,74 @@
     {
       "key": "syncedAt",
       "value": "2026-01-01T00:00:00Z"
+    },
+    {
+      "key": "sessionId_usr_01",
+      "value": ""
+    },
+    {
+      "key": "sessionKey_usr_01",
+      "value": ""
+    },
+    {
+      "key": "sessionId_usr_02",
+      "value": ""
+    },
+    {
+      "key": "sessionKey_usr_02",
+      "value": ""
+    },
+    {
+      "key": "sessionId_usr_03",
+      "value": ""
+    },
+    {
+      "key": "sessionKey_usr_03",
+      "value": ""
+    },
+    {
+      "key": "inquiryOk",
+      "value": ""
+    },
+    {
+      "key": "inquiryLarge",
+      "value": ""
+    },
+    {
+      "key": "inquiryDecline",
+      "value": ""
+    },
+    {
+      "key": "inquiryOmar",
+      "value": ""
+    },
+    {
+      "key": "inquiryPending",
+      "value": ""
+    },
+    {
+      "key": "replayPayload",
+      "value": ""
+    },
+    {
+      "key": "confirmKey",
+      "value": ""
+    },
+    {
+      "key": "confirmPayload",
+      "value": ""
+    },
+    {
+      "key": "txnId",
+      "value": ""
+    },
+    {
+      "key": "txnPending",
+      "value": ""
+    },
+    {
+      "key": "momknCrypto",
+      "value": ""
     }
   ],
   "event": [
@@ -46,7 +114,11 @@
         "type": "text/javascript",
         "exec": [
           "// fresh X-Request-Id for every request",
-          "pm.collectionVariables.set('requestId', pm.variables.replaceIn('{{$guid}}'));"
+          "pm.collectionVariables.set('requestId', pm.variables.replaceIn('{{$guid}}'));",
+          "",
+          "// AES-256-GCM helpers for encrypted payloads (source: postman/momkn-encrypt.js).",
+          "// Request scripts load them with: eval(pm.collectionVariables.get('momknCrypto'));",
+          "pm.collectionVariables.set('momknCrypto', \"function momknEncrypt(keyBase64, plaintext, ivOverride) {\\n    // ---- bytes ------------------------------------------------------------------------------\\n    const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\\n    function fromBase64(text) {\\n        const clean = text.replace(/[^A-Za-z0-9+/]/g, '');\\n        const out = [];\\n        let buffer = 0, bits = 0;\\n        for (const ch of clean) {\\n            buffer = (buffer << 6) | B64.indexOf(ch);\\n            bits += 6;\\n            if (bits >= 8) {\\n                bits -= 8;\\n                out.push((buffer >> bits) & 0xff);\\n            }\\n        }\\n        return out;\\n    }\\n    function toBase64(bytes) {\\n        let out = '';\\n        for (let i = 0; i < bytes.length; i += 3) {\\n            const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);\\n            out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];\\n            out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : '=';\\n            out += i + 2 < bytes.length ? B64[n & 63] : '=';\\n        }\\n        return out;\\n    }\\n    function utf8(text) {\\n        const out = [];\\n        for (const ch of unescape(encodeURIComponent(text))) out.push(ch.charCodeAt(0));\\n        return out;\\n    }\\n    function randomBytes(n) {\\n        const out = new Array(n);\\n        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {\\n            const buf = new Uint8Array(n);\\n            crypto.getRandomValues(buf);\\n            for (let i = 0; i < n; i++) out[i] = buf[i];\\n        } else {\\n            for (let i = 0; i < n; i++) out[i] = Math.floor(Math.random() * 256);\\n        }\\n        return out;\\n    }\\n\\n    // ---- AES-256 block cipher (FIPS-197) -----------------------------------------------------\\n    const SBOX = new Array(256);\\n    (function buildSbox() {\\n        const rotl = (x, s) => ((x << s) | (x >> (8 - s))) & 0xff;\\n        let p = 1, q = 1;\\n        do {\\n            p = (p ^ (p << 1) ^ (p & 0x80 ? 0x1b : 0)) & 0xff; // p × 3\\n            q ^= q << 1; q ^= q << 2; q ^= q << 4; q &= 0xff;   // q ÷ 3\\n            if (q & 0x80) q ^= 0x09;\\n            SBOX[p] = (q ^ rotl(q, 1) ^ rotl(q, 2) ^ rotl(q, 3) ^ rotl(q, 4) ^ 0x63) & 0xff;\\n        } while (p !== 1);\\n        SBOX[0] = 0x63;\\n    })();\\n    const xtime = (b) => ((b << 1) ^ (b & 0x80 ? 0x1b : 0)) & 0xff;\\n\\n    function expandKey(key) { // 32-byte key → 60 words of 4 bytes\\n        const words = [];\\n        for (let i = 0; i < 8; i++) words.push(key.slice(4 * i, 4 * i + 4));\\n        let rcon = 1;\\n        for (let i = 8; i < 60; i++) {\\n            let t = words[i - 1].slice();\\n            if (i % 8 === 0) {\\n                t = [SBOX[t[1]] ^ rcon, SBOX[t[2]], SBOX[t[3]], SBOX[t[0]]];\\n                rcon = xtime(rcon);\\n            } else if (i % 8 === 4) {\\n                t = t.map((b) => SBOX[b]);\\n            }\\n            words.push(words[i - 8].map((b, j) => b ^ t[j]));\\n        }\\n        return words;\\n    }\\n\\n    function encryptBlock(words, input) {\\n        let s = input.slice();\\n        const addRoundKey = (round) => {\\n            for (let i = 0; i < 16; i++) s[i] ^= words[round * 4 + (i >> 2)][i & 3];\\n        };\\n        const subShift = () => {\\n            const t = new Array(16);\\n            for (let c = 0; c < 4; c++) {\\n                for (let r = 0; r < 4; r++) t[r + 4 * c] = SBOX[s[r + 4 * ((c + r) % 4)]];\\n            }\\n            s = t;\\n        };\\n        const mixColumns = () => {\\n            for (let c = 0; c < 4; c++) {\\n                const a = s.slice(4 * c, 4 * c + 4);\\n                const x = a.map(xtime);\\n                s[4 * c] = x[0] ^ x[1] ^ a[1] ^ a[2] ^ a[3];\\n                s[4 * c + 1] = a[0] ^ x[1] ^ x[2] ^ a[2] ^ a[3];\\n                s[4 * c + 2] = a[0] ^ a[1] ^ x[2] ^ x[3] ^ a[3];\\n                s[4 * c + 3] = x[0] ^ a[0] ^ a[1] ^ a[2] ^ x[3];\\n            }\\n        };\\n        addRoundKey(0);\\n        for (let round = 1; round < 14; round++) {\\n            subShift();\\n            mixColumns();\\n            addRoundKey(round);\\n        }\\n        subShift();\\n        addRoundKey(14);\\n        return s;\\n    }\\n\\n    // ---- GCM (NIST SP 800-38D) ---------------------------------------------------------------\\n    function gfMultiply(x, y) {\\n        const z = new Array(16).fill(0);\\n        const v = y.slice();\\n        for (let i = 0; i < 128; i++) {\\n            if ((x[i >> 3] >> (7 - (i & 7))) & 1) for (let j = 0; j < 16; j++) z[j] ^= v[j];\\n            const lsb = v[15] & 1;\\n            for (let j = 15; j > 0; j--) v[j] = ((v[j] >> 1) | ((v[j - 1] & 1) << 7)) & 0xff;\\n            v[0] >>= 1;\\n            if (lsb) v[0] ^= 0xe1;\\n        }\\n        return z;\\n    }\\n    function increment32(counter) {\\n        const out = counter.slice();\\n        for (let i = 15; i >= 12; i--) {\\n            out[i] = (out[i] + 1) & 0xff;\\n            if (out[i] !== 0) break;\\n        }\\n        return out;\\n    }\\n\\n    const key = fromBase64(keyBase64);\\n    if (key.length !== 32) throw new Error('sessionKey must be base64 of 32 bytes');\\n    const words = expandKey(key);\\n    const iv = ivOverride || randomBytes(12);\\n    const hashKey = encryptBlock(words, new Array(16).fill(0));\\n    const j0 = iv.concat([0, 0, 0, 1]);\\n\\n    const plain = utf8(plaintext);\\n    const cipher = [];\\n    let counter = j0;\\n    for (let offset = 0; offset < plain.length; offset += 16) {\\n        counter = increment32(counter);\\n        const stream = encryptBlock(words, counter);\\n        for (let i = 0; i < 16 && offset + i < plain.length; i++) {\\n            cipher.push(plain[offset + i] ^ stream[i]);\\n        }\\n    }\\n\\n    let ghash = new Array(16).fill(0);\\n    for (let offset = 0; offset < cipher.length; offset += 16) {\\n        const block = new Array(16).fill(0);\\n        for (let i = 0; i < 16 && offset + i < cipher.length; i++) block[i] = cipher[offset + i];\\n        ghash = gfMultiply(ghash.map((b, i) => b ^ block[i]), hashKey);\\n    }\\n    const bitLength = cipher.length * 8; // AAD length is 0\\n    const lengths = new Array(16).fill(0);\\n    for (let i = 0; i < 4; i++) lengths[15 - i] = (bitLength >>> (8 * i)) & 0xff;\\n    ghash = gfMultiply(ghash.map((b, i) => b ^ lengths[i]), hashKey);\\n    const tag = encryptBlock(words, j0).map((b, i) => b ^ ghash[i]);\\n\\n    return toBase64(iv.concat(cipher, tag));\\n}\\nfunction momknSeal(keyBase64, fields) {\\n    const bytes = [];\\n    for (let i = 0; i < 16; i++) {\\n        bytes.push(\\n            typeof crypto !== 'undefined' && crypto.getRandomValues\\n                ? crypto.getRandomValues(new Uint8Array(1))[0]\\n                : Math.floor(Math.random() * 256));\\n    }\\n    const nonce = bytes.map((b) => ('0' + b.toString(16)).slice(-2)).join('');\\n    const body = Object.assign({}, fields, { nonce: nonce, ts: Math.floor(Date.now() / 1000) });\\n    return momknEncrypt(keyBase64, JSON.stringify(body));\\n}\");"
         ]
       }
     }
@@ -522,18 +594,1991 @@
     },
     {
       "name": "04 Inquiry rules",
-      "description": "Filled in by slice M3-S9. Requests need the AES-GCM encrypt helper (collection pre-request script).",
-      "item": []
+      "description": "One request per mock rule (SRS §6): the outcome is the subscriber number's last digit. Run 04 before 05.",
+      "item": [
+        {
+          "name": "Create session (usr_01)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('sessionId_usr_01', pm.response.json().sessionId);",
+                  "pm.collectionVariables.set('sessionKey_usr_01', pm.response.json().sessionKey);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — digit 1, worked example",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750891' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 quote', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().total).to.eql(25320);",
+                  "});",
+                  "pm.collectionVariables.set('inquiryOk', pm.response.json().inquiryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — digit 0 → SUBSCRIBER_NOT_FOUND",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750890' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 SUBSCRIBER_NOT_FOUND', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('SUBSCRIBER_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — digit 9 → BILL_ALREADY_PAID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750899' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 BILL_ALREADY_PAID', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('BILL_ALREADY_PAID');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — digit 6, bill above maxAmount",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750896' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, amountDue above 500000', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().amountDue).to.be.above(500000);",
+                  "});",
+                  "pm.collectionVariables.set('inquiryLarge', pm.response.json().inquiryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — digit 7, will decline",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750897' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 quote', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.collectionVariables.set('inquiryDecline', pm.response.json().inquiryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — _slow service (8 s)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_canal_slow\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750891' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 after the slow delay', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.responseTime).to.be.above(7000);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — inactive service → SERVICE_UNAVAILABLE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_alex\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750891' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('503 SERVICE_UNAVAILABLE', () => {",
+                  "  pm.response.to.have.status(503);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('SERVICE_UNAVAILABLE');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — wrong format → VALIDATION_ERROR",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '102475089' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_ERROR', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(pm.response.json().error.field).to.eql('subscriberNumber');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — send a payload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750892' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "pm.collectionVariables.set('replayPayload', payload);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 quote', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry — same payload again → DECRYPTION_FAILED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{replayPayload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 DECRYPTION_FAILED', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('DECRYPTION_FAILED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "05 Confirm rules",
-      "description": "Filled in by slice M3-S9. Requests need the AES-GCM encrypt helper (collection pre-request script).",
-      "item": []
+      "description": "Idempotency and every confirm outcome. Confirm is rate-limited to 5/min per user, so the cases are spread over usr_01 and usr_03; usr_02 is left with an empty history. INQUIRY_EXPIRED needs a 5-minute wait and is covered by the integration tests instead.",
+      "item": [
+        {
+          "name": "Confirm — success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{confirmKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryOk}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { pin: '1234' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.collectionVariables.set('confirmKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "pm.collectionVariables.set('confirmPayload', payload);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 SUCCESS', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.status).to.eql('SUCCESS');",
+                  "  pm.expect(body.total).to.eql(25320);",
+                  "  pm.expect(body.reference).to.match(/^MP-[0-9]{8}-[0-9]{4,}$/);",
+                  "  pm.collectionVariables.set('txnId', body.transactionId);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — retry, same key and bytes → same transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{confirmKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryOk}}\",\"payload\":\"{{confirmPayload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, same transaction', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().transactionId).to.eql(pm.collectionVariables.get('txnId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — same key, other inquiry → IDEMPOTENCY_CONFLICT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{confirmKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryDecline}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { pin: '1234' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 IDEMPOTENCY_CONFLICT', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_CONFLICT');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — digit 7 → INSUFFICIENT_BALANCE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{freshKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryDecline}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { pin: '1234' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('402 INSUFFICIENT_BALANCE', () => {",
+                  "  pm.response.to.have.status(402);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('INSUFFICIENT_BALANCE');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — digit 6 → AMOUNT_OUT_OF_RANGE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{freshKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryLarge}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { pin: '1234' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 AMOUNT_OUT_OF_RANGE', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('AMOUNT_OUT_OF_RANGE');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create session (usr_03)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('sessionId_usr_03', pm.response.json().sessionId);",
+                  "pm.collectionVariables.set('sessionKey_usr_03', pm.response.json().sessionKey);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry (usr_03) for the wrong-PIN path",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { subscriberNumber: '1024750892' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 quote', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.collectionVariables.set('inquiryOmar', pm.response.json().inquiryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — wrong PIN 1/3 → VALIDATION_ERROR (pin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{freshKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryOmar}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '1234' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_ERROR', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(pm.response.json().error.field).to.eql('pin');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — wrong PIN 2/3 → VALIDATION_ERROR (pin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{freshKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryOmar}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '1234' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_ERROR', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(pm.response.json().error.field).to.eql('pin');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — wrong PIN 3/3 → VALIDATION_ERROR (pin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{freshKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryOmar}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '1234' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_ERROR', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(pm.response.json().error.field).to.eql('pin');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — right PIN after 3 wrong → INQUIRY_INVALIDATED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{freshKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryOmar}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '9999' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('410 INQUIRY_INVALIDATED', () => {",
+                  "  pm.response.to.have.status(410);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('INQUIRY_INVALIDATED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inquiry (usr_03) — digit 8, will be pending",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/inquiry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "inquiry"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"serviceId\":\"svc_elec_cairo\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { subscriberNumber: '1024750898' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 quote', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.collectionVariables.set('inquiryPending', pm.response.json().inquiryId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm — digit 8 → PENDING (usr_03's 5th confirm)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{freshKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inquiryId\":\"{{inquiryPending}}\",\"payload\":\"{{payload}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '9999' });",
+                  "pm.variables.set('payload', payload);",
+                  "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 PENDING, paidAt null', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('PENDING');",
+                  "  pm.expect(pm.response.json().paidAt).to.eql(null);",
+                  "  pm.collectionVariables.set('txnPending', pm.response.json().transactionId);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "06 History",
-      "description": "Filled in by slice M3-S9. Requests need the AES-GCM encrypt helper (collection pre-request script).",
-      "item": []
+      "item": [
+        {
+          "name": "History (usr_01)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/transactions?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, newest first, includes the new payment', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const items = pm.response.json().items;",
+                  "  pm.expect(items.map(i => i.transactionId)).to.include(pm.collectionVariables.get('txnId'));",
+                  "  const times = items.map(i => Date.parse(i.createdAt));",
+                  "  pm.expect(times).to.eql([...times].sort((a, b) => b - a));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Receipt (usr_01)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/transactions/{{txnId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "transactions",
+                "{{txnId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 receipt', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const r = pm.response.json();",
+                  "  pm.expect(r.status).to.eql('SUCCESS');",
+                  "  pm.expect([r.amountDue, r.serviceFee, r.vat, r.total]).to.eql([24750, 500, 70, 25320]);",
+                  "  pm.expect(r.subscriberNumber).to.eql('1024750891');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Receipt of another user → TRANSACTION_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_02"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/transactions/{{txnId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "transactions",
+                "{{txnId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 TRANSACTION_NOT_FOUND', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('TRANSACTION_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Receipt of the pending payment (usr_03)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/transactions/{{txnPending}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "transactions",
+                "{{txnPending}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PENDING, or SUCCESS once 10 s have passed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(['PENDING', 'SUCCESS']).to.include(pm.response.json().status);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "History — size 51 → VALIDATION_ERROR",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/transactions?size=51",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "51"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_ERROR', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(pm.response.json().error.field).to.eql('size');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }
