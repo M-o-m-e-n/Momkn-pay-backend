@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  One line per event, UTC timestamps, request id on every line.
+  Never log request/response bodies. Hibernate SQL and bind-parameter logging stay OFF:
+  bind logging would print subscriber numbers (CODING_STANDARDS §10.3, §12).
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <property name="CONSOLE_LOG_PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC} %-5level [%X{requestId:-none}] %logger{36} - %msg%n"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <logger name="org.hibernate.SQL" level="OFF"/>
+    <logger name="org.hibernate.orm.jdbc.bind" level="OFF"/>
+</configuration>
