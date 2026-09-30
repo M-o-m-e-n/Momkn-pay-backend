@@ -26,6 +26,7 @@ import com.momknpay.session.service.PayloadDecryptor;
 import com.momknpay.transaction.domain.Transaction;
 import com.momknpay.transaction.domain.TransactionStatus;
 import com.momknpay.transaction.repository.TransactionRepository;
+import com.momknpay.transaction.service.PendingResolver;
 import com.momknpay.user.domain.User;
 import com.momknpay.user.repository.UserRepository;
 import java.time.Duration;
@@ -64,6 +65,7 @@ class ConfirmServiceTest {
                     decryptor,
                     pinEncoder,
                     mock(SlowServiceDelay.class),
+                    new PendingResolver(transactions, time),
                     tx,
                     time,
                     new AppProperties(
