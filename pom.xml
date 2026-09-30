@@ -11,7 +11,7 @@
 
   <groupId>com.momknpay</groupId>
   <artifactId>momknpay-api</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>1.0.0</version>
   <name>momknpay-api</name>
   <description>Momkn Pay — simulated bill-payment backend (internship capstone)</description>
 
