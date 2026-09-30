@@ -3,12 +3,14 @@ package com.momknpay.catalog;
 import static com.momknpay.support.ApiRequests.withClientHeaders;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.TestcontainersConfiguration;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -16,15 +18,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** GET /v1/services (FR-CAT-1…3, FR-CAT-7). */
+/** GET /v1/services and GET /v1/services/sync (FR-CAT-1…7). */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class CatalogIT {
 
     @Autowired private MockMvc mvc;
+    @Autowired private JdbcTemplate jdbc;
 
     @Test
     void catalogueListsEveryVisibleServiceIncludingInactiveOnes() throws Exception {
@@ -86,6 +90,60 @@ class CatalogIT {
     @Test
     void catalogueDoesNotNeedAUser() throws Exception {
         mvc.perform(withClientHeaders(get("/v1/services"))).andExpect(status().isOk());
+    }
+
+    @Test
+    void syncFromBeforeTheSeedReturnsEverythingAndTheDeletedIds() throws Exception {
+        String body = getJson("/v1/services/sync?since=2026-01-01T00:00:00Z");
+
+        List<String> ids = JsonPath.read(body, "$.items[*].id");
+        List<String> deleted = JsonPath.read(body, "$.deletedIds");
+        assertThat(ids).hasSizeGreaterThanOrEqualTo(24).doesNotContain("svc_water_legacy");
+        assertThat(deleted).containsExactly("svc_water_legacy");
+    }
+
+    @Test
+    void syncFromTheFutureIsEmpty() throws Exception {
+        String since =
+                Instant.now().plus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS).toString();
+
+        mvc.perform(withClientHeaders(get("/v1/services/sync").param("since", since)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.deletedIds").isEmpty())
+                .andExpect(jsonPath("$.syncedAt").isString());
+    }
+
+    @Test
+    void aRowChangedAfterTheLastSyncIsSentAgain() throws Exception {
+        String lastSync = JsonPath.read(getJson("/v1/services"), "$.syncedAt");
+
+        jdbc.update("UPDATE services SET name_en = name_en WHERE id = 'svc_gas_egypt'"); // trigger
+        // bumps
+        // updated_at
+
+        String body =
+                mvc.perform(withClientHeaders(get("/v1/services/sync").param("since", lastSync)))
+                        .andExpect(status().isOk())
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString();
+        List<String> ids = JsonPath.read(body, "$.items[*].id");
+        assertThat(ids).contains("svc_gas_egypt");
+    }
+
+    @Test
+    void missingOrInvalidSinceIsValidationError() throws Exception {
+        for (var request :
+                List.of(
+                        get("/v1/services/sync"),
+                        get("/v1/services/sync").param("since", "yesterday"),
+                        get("/v1/services/sync").param("since", "2026-13-45T99:00:00Z"))) {
+            mvc.perform(withClientHeaders(request))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                    .andExpect(jsonPath("$.error.field").value("since"));
+        }
     }
 
     private String getJson(String path) throws Exception {
