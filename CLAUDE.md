@@ -88,15 +88,17 @@ If a prompt conflicts with these documents, **stop and say so**. Do not silently
 
 ## Commands
 
-The project is not scaffolded yet (slice M0-S1). These are the intended commands. Update this section when they change.
+Use the Maven wrapper. Integration tests (`*IT`) need Docker running (Testcontainers).
 
 | Task | Command |
 |---|---|
-| Format | `mvn spotless:apply` |
-| Build + all checks + tests | `mvn verify` |
-| Unit tests only | `mvn test` |
+| Format | `./mvnw spotless:apply` |
+| Build + formatting check + all tests | `./mvnw verify` |
+| Unit tests only | `./mvnw test` |
+| One integration test | `./mvnw verify -Dit.test=SessionIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false` |
+| Certificates / SPKI pins | `TLS_KEYSTORE_PASSWORD=... ./scripts/generate-certs.sh` |
 | Run locally | `docker compose up --build` → `https://api.momknpay.local/docs` |
-| Certificates / SPKI pin | see `docs/LLD.md` §13.3 |
+| Lint the contract | `npx @redocly/cli lint docs/openapi.yaml` |
 
 ## Environment notes
 
