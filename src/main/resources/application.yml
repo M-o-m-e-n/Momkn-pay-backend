@@ -1,3 +1,8 @@
+server:
+  error:
+    whitelabel:
+      enabled: false
+
 spring:
   application:
     name: momknpay-api
@@ -16,6 +21,13 @@ spring:
       ddl-auto: validate
     properties:
       hibernate.jdbc.time_zone: UTC
+  jackson:
+    time-zone: UTC
+    deserialization:
+      fail-on-unknown-properties: true   # a read-only or misspelled field is a VALIDATION_ERROR
+  mvc:
+    problemdetails:
+      enabled: false                     # the error envelope is the only error format
   flyway:
     enabled: true
     locations: classpath:db/migration,classpath:com/momknpay/db/migration
