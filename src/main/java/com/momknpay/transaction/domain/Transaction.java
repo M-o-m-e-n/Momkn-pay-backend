@@ -85,6 +85,56 @@ public class Transaction {
     protected Transaction() {}
 
     /**
+     * A new attempt snapshotting the inquiry's amounts. Exactly one of {@link #succeed}, {@link
+     * #pend} or {@link #fail} must be called before it is saved.
+     */
+    public Transaction(
+            long seq,
+            String reference,
+            String userId,
+            String inquiryId,
+            BillerService service,
+            UUID idempotencyKey,
+            String subscriberNumber,
+            String customerName,
+            String billMonth,
+            long amountDue,
+            long serviceFee,
+            long vat,
+            Instant createdAt) {
+        this.id = "txn_" + seq;
+        this.seq = seq;
+        this.reference = reference;
+        this.userId = userId;
+        this.inquiryId = inquiryId;
+        this.service = service;
+        this.idempotencyKey = idempotencyKey;
+        this.subscriberNumber = subscriberNumber;
+        this.customerName = customerName;
+        this.billMonth = billMonth;
+        this.amountDue = amountDue;
+        this.serviceFee = serviceFee;
+        this.vat = vat;
+        this.total = Math.addExact(Math.addExact(amountDue, serviceFee), vat);
+        this.createdAt = createdAt;
+    }
+
+    public void succeed(Instant paidAt) {
+        this.status = TransactionStatus.SUCCESS;
+        this.paidAt = paidAt;
+    }
+
+    public void pend(Instant pendingUntil) {
+        this.status = TransactionStatus.PENDING;
+        this.pendingUntil = pendingUntil;
+    }
+
+    public void fail(String failureCode) {
+        this.status = TransactionStatus.FAILED;
+        this.failureCode = failureCode;
+    }
+
+    /**
      * PENDING → SUCCESS once {@code pendingUntil} has passed. {@code paidAt} is the moment the
      * transaction was due, so it does not depend on when it happens to be read.
      *

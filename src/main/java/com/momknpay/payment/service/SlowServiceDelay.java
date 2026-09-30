@@ -22,7 +22,12 @@ public class SlowServiceDelay {
     }
 
     public void applyIf(BillerService service) {
-        if (service != null && service.isSlow() && !delay.isZero()) {
+        applyIf(service != null && service.isSlow());
+    }
+
+    /** For callers that decided slowness inside their transaction and have committed since. */
+    public void applyIf(boolean slow) {
+        if (slow && !delay.isZero()) {
             try {
                 Thread.sleep(delay);
             } catch (InterruptedException e) {
