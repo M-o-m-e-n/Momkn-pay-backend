@@ -21,3 +21,7 @@ Thumbs.db
 
 # logs
 *.log
+
+# Postman desktop workspace files (per developer)
+postman/.postman/
+postman/postman/
