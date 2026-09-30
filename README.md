@@ -20,14 +20,29 @@ Java 25 · Spring Boot 4 · PostgreSQL 16 · Spring Data JPA · Flyway · Maven 
 ./mvnw test            # unit tests only
 ```
 
-## Run locally
-
-Full Docker Compose + HTTPS instructions arrive with milestone M1 (slice M1-S5). Until then:
+## Run locally (Docker Compose, HTTPS)
 
 ```bash
-docker run -d --name momknpay-db -e POSTGRES_DB=momknpay -e POSTGRES_USER=momknpay \
-  -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
-DB_PASSWORD=change-me ./mvnw spring-boot:run
+cp .env.example .env                       # fill DB_PASSWORD, APP_MASTER_KEY, TLS_KEYSTORE_PASSWORD
+TLS_KEYSTORE_PASSWORD=<same as in .env> ./scripts/generate-certs.sh
+# hosts file: 127.0.0.1 api.momknpay.local
+docker compose up --build
+```
+
+- API: `https://api.momknpay.local/v1` · Swagger UI: `https://api.momknpay.local/docs` · health: `/actuator/health`
+- HTTPS only — there is no HTTP listener.
+- `APP_MASTER_KEY`: `openssl rand -base64 32`.
+
+### Certificate and SPKI pins
+
+`scripts/generate-certs.sh` writes a self-signed certificate for `api.momknpay.local`, the keystore, an offline backup key, and `certs/pins.txt` with the **live** and **backup** SPKI SHA-256 pins.
+
+Every run creates a new key, so the backend track generates the certificate **once**, shares `certs/keystore.p12` privately (never through git), and publishes the two pins from `pins.txt` to the iOS and Android tracks and the contract repository. Clients pin both hashes so the key can be rotated to the backup.
+
+Check a running server against the certificate:
+
+```bash
+curl --cacert certs/cert.pem https://api.momknpay.local/actuator/health
 ```
 
 ## API contract
