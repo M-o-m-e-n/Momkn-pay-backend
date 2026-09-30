@@ -559,7 +559,7 @@ public record CatalogResponse(Instant syncedAt, List<ServiceItem> items) {}
   "deletedIds": ["svc_water_legacy"] }
 ```
 
-Delivery is **at-least-once**: the filter is `>= since` (timestamps are second-precision), so a boundary row may arrive twice. Clients upsert, so a duplicate is harmless.
+Delivery is **at-least-once**: the filter is `>= since` (timestamps are second-precision), and `syncedAt` is returned 5 seconds before the server's "now" so a skew between the application clock and the database clock (which stamps `updated_at` through the trigger) can never make a row be missed. A few boundary rows may therefore arrive twice. Clients upsert, so duplicates are harmless.
 
 ```java
 public record SyncResponse(Instant syncedAt, List<ServiceItem> items, List<String> deletedIds) {}
