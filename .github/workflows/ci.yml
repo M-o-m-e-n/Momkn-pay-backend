@@ -26,6 +26,17 @@ jobs:
       - name: Verify
         run: ./mvnw -B -ntp verify
 
+      # the contract check is OpenApiContractIT (part of verify); this keeps the generated spec
+      # and the coverage report for review on every run
+      - name: Upload generated OpenAPI and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-and-coverage
+          path: |
+            target/openapi-generated.json
+            target/site/jacoco
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
