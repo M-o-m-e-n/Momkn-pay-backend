@@ -85,28 +85,28 @@ flowchart LR
 **Goal:** the clients are never blocked. By the end of day 2 the contract is published and frozen.
 **Exit demo:** the OpenAPI 3.1 file is in `momknpay-contract`, and a Prism mock server started from it answers every endpoint.
 
-- [ ] **M0-S1 · Project skeleton**
-  - [ ] Spring Boot + Java 25 Maven project, package `com.momknpay`, `MomknPayApplication`.
-  - [ ] Dependencies: web, validation, data-jpa, flyway, postgresql, actuator, springdoc, spring-security-crypto, bucket4j, caffeine, testcontainers.
-  - [ ] `.gitignore` (`.env`, `certs/`, `target/`), `.env.example` (LLD §10.2), empty `README.md`.
-  - [ ] **Done when:** `mvn verify` passes, and the app starts against a local Postgres with an empty Flyway history.
+- [x] **M0-S1 · Project skeleton**
+  - [x] Spring Boot + Java 25 Maven project, package `com.momknpay`, `MomknPayApplication`.
+  - [x] Dependencies: web, validation, data-jpa, flyway, postgresql, actuator, springdoc, spring-security-crypto, bucket4j, caffeine, testcontainers.
+  - [x] `.gitignore` (`.env`, `certs/`, `target/`), `.env.example` (LLD §10.2), empty `README.md`.
+  - [x] **Done when:** `mvn verify` passes, and the app starts against a local Postgres with an empty Flyway history.
   - Refs: HLD §15, LLD §2
 
 - [ ] **M0-S2 · Repository hygiene and CI**
-  - [ ] Protected `main`, a pull request template (description, test evidence, linked ticket), conventional-commit guideline in the README.
-  - [ ] GitHub Actions: `mvn -B verify` on every pull request.
-  - [ ] **Done when:** a test pull request shows a green CI check and cannot merge without approval.
+  - [ ] Protected `main`, a pull request template (description, test evidence, linked ticket), conventional-commit guideline in the README. *(template and conventions done; branch protection is set on GitHub once the remote exists)*
+  - [x] GitHub Actions: `mvn -B verify` on every pull request.
+  - [ ] **Done when:** a test pull request shows a green CI check and cannot merge without approval. *(needs the GitHub remote)*
   - Refs: NFR-MNT-5
 
 - [ ] **M0-S3 · OpenAPI draft (contract)**
-  - [ ] Write `docs/openapi.yaml` by hand from LLD §6: all 10 endpoints, headers, DTO schemas, examples, the error envelope and every error code.
-  - [ ] Changelog section with `v1.0.0 — initial contract`.
-  - [ ] **Done when:** the spec validates (`npx @redocly/cli lint`), Prism serves it, and both client tracks have reviewed it.
+  - [x] Write `docs/openapi.yaml` by hand from LLD §6: all 10 endpoints, headers, DTO schemas, examples, the error envelope and every error code.
+  - [x] Changelog section with `v1.0.0 — initial contract`.
+  - [ ] **Done when:** the spec validates (`npx @redocly/cli lint`), Prism serves it, and both client tracks have reviewed it. *(lint and Prism verified; waiting for the client tracks' review)*
   - Refs: SRS §4, LLD §6
 
 - [ ] **M0-S4 · Publish and freeze**
-  - [ ] Push to `momknpay-contract`, add the Postman collection skeleton (folders from LLD §13.5), and announce the freeze.
-  - [ ] **Done when:** both client leads acknowledge the freeze. From now on every contract change needs an issue, sign-off from both clients and a version bump.
+  - [ ] Push to `momknpay-contract`, add the Postman collection skeleton (folders from LLD §13.5), and announce the freeze. *(Postman skeleton done; pushing to `momknpay-contract` and announcing are manual)*
+  - [ ] **Done when:** both client leads acknowledge the freeze. From now on every contract change needs an issue, sign-off from both clients and a version bump. *(manual)*
   - Refs: SRS C-7
 
 ---
