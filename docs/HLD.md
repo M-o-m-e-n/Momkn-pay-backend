@@ -4,7 +4,7 @@
 |---|---|
 | Document | High-Level Design |
 | Product | Momkn Pay — Backend API |
-| Version | 1.0 (contract `v1`) |
+| Version | 2.0 (contract v2.0.0, paths under `/v1`) |
 | Date | 2026-09-30 |
 | Related documents | [SRS.md](SRS.md) (requirements), [LLD.md](LLD.md) (detailed design) |
 
@@ -46,7 +46,7 @@ This document describes the architecture of the Momkn Pay backend: its component
 | One frozen contract for three teams | SRS C-7 | Code-first OpenAPI (springdoc) exported to the contract repository. DTOs are the single source of the schema. |
 | Payment correctness under retries | FR-PAY-2…4 | Idempotency key stored on the transaction with a database unique constraint, plus a row lock on the inquiry. |
 | Deterministic, demo-safe outcomes | FR-MCK-1 | A pure `MockPaymentEngine` with no randomness and no I/O. |
-| Protect PIN and subscriber number beyond TLS | NFR-SEC-1…4 | A session-scoped AES-256-GCM key, a replay guard, and keys wrapped at rest. |
+| Protect PIN and subscriber number beyond TLS | NFR-SEC-1…4 | AES-256-GCM payloads with one static shared key from the environment, and a replay guard (ADR-011). |
 | Integer money | C-2 | `long` in Java, `BIGINT` in SQL, integer-only fee arithmetic. |
 | One-command startup | NFR-OPS-1 | Docker Compose, Flyway migrations and seed data applied at boot. |
 | No auth | C-1 | A `CurrentUserArgumentResolver` resolves `X-User-Id` into a user. It is the single place to swap in real auth later. |
@@ -125,14 +125,13 @@ flowchart TB
         EH["GlobalExceptionHandler<br/>(error envelope)"]
     end
     subgraph Service["Service layer (business logic, @Transactional)"]
-        S1["SessionService"]
         S2["ProfileService"]
         S3["CatalogService"]
         S4["InquiryService"]
         S5["ConfirmService"]
         S6["TransactionService"]
         ENG["MockPaymentEngine + FeeCalculator<br/>(pure functions)"]
-        CR["PayloadDecryptor<br/>AesGcmCipher · ReplayGuard · KeyWrapper"]
+        CR["PayloadDecryptor<br/>AesGcmCipher · ReplayGuard · PayloadKey"]
     end
     subgraph Data["Persistence layer"]
         REPO["Spring Data JPA repositories"]
@@ -141,10 +140,10 @@ flowchart TB
 
     F1 --> I1 --> I2 --> C
     R1 --> C
-    C --> S1 & S2 & S3 & S4 & S5 & S6
+    C --> S2 & S3 & S4 & S5 & S6
     S4 & S5 --> CR
     S4 & S5 --> ENG
-    S1 & S2 & S3 & S4 & S5 & S6 --> REPO
+    S2 & S3 & S4 & S5 & S6 --> REPO
     CR --> REPO
     REPO --> DB
     C -. exceptions .-> EH
@@ -179,7 +178,7 @@ sequenceDiagram
     RF->>HI: continue
     HI->>HI: validate X-Request-Id / X-Client-Platform / X-Client-Version
     HI->>RL: continue
-    RL->>RL: consume token (only /sessions, /payments/confirm)
+    RL->>RL: consume token (only /payments/confirm)
     RL->>AR: continue
     AR->>AR: load user by X-User-Id (user-scoped endpoints)
     AR->>Ctl: invoke with @Valid DTO + User
@@ -201,14 +200,14 @@ Package root: `com.momknpay`. Each feature module has `web` (controller + DTOs),
 
 | Module | Responsibility | Main components | Tables owned | SRS |
 |---|---|---|---|---|
-| `common` | Cross-cutting: errors, web plumbing, crypto, rate limiting, ID generation, clock | `GlobalExceptionHandler`, `ApiException`, `ErrorCode`, `RequestIdFilter`, `RequiredHeadersInterceptor`, `RateLimitInterceptor`, `CurrentUserArgumentResolver`, `AesGcmCipher`, `KeyWrapper`, `IdGenerator` | — | FR-COM, NFR-SEC |
+| `common` | Cross-cutting: errors, web plumbing, crypto, rate limiting, ID generation, clock | `GlobalExceptionHandler`, `ApiException`, `ErrorCode`, `RequestIdFilter`, `RequiredHeadersInterceptor`, `RateLimitInterceptor`, `CurrentUserArgumentResolver`, `AesGcmCipher`, `PayloadKey`, `IdGenerator` | — | FR-COM, NFR-SEC |
 | `user` | Seeded users and profile | `ProfileController`, `ProfileService`, `UserRepository` | `users` | FR-PRO |
-| `session` | Crypto sessions, key issuance, payload decryption, replay guard | `SessionController`, `SessionService`, `PayloadDecryptor`, `ReplayGuard` | `sessions`, `used_nonces` | FR-SES, NFR-SEC-1…4 |
+| `payload` | Payload decryption with the static shared key, replay guard, nonce cleanup | `PayloadDecryptor`, `ReplayGuard`, `NonceCleanupJob` | `used_nonces` | FR-ENC, NFR-SEC-1…4 |
 | `catalog` | Service catalogue and delta sync | `CatalogController`, `CatalogService`, `BillerServiceRepository` | `services` | FR-CAT |
 | `payment` | Inquiry, confirm, mock engine, fee calculation, idempotency | `PaymentController`, `InquiryService`, `ConfirmService`, `MockPaymentEngine`, `FeeCalculator`, `InquiryRepository` | `inquiries` | FR-INQ, FR-PAY, FR-MCK |
 | `transaction` | History, receipts, pending resolution | `TransactionController`, `TransactionService`, `PendingResolver`, `TransactionRepository` | `transactions` | FR-TXN |
 
-Dependency direction: `payment → session, catalog, user, transaction → common`. There are no cycles. `common` depends on nothing in the feature modules.
+Dependency direction: `payment → payload, catalog, user, transaction → common`. There are no cycles. `common` depends on nothing in the feature modules.
 
 ---
 
@@ -218,14 +217,12 @@ Base URL `https://api.momknpay.local/v1`. All requests carry `X-Request-Id`, `X-
 
 | Method | Path | Extra headers | Request | Success | Module | SRS |
 |---|---|---|---|---|---|---|
-| POST | `/sessions` | `X-User-Id` | — | `201` `{sessionId, sessionKey, expiresAt}` | session | FR-SES-1 |
-| DELETE | `/sessions/{sessionId}` | `X-User-Id` | — | `204` | session | FR-SES-5 |
 | GET | `/profile` | `X-User-Id` | — | `200` Profile | user | FR-PRO-1 |
 | PATCH | `/profile` | `X-User-Id` | `{fullName?, email?}` | `200` Profile | user | FR-PRO-2 |
 | GET | `/services` | — | — | `200` `{syncedAt, items[]}` | catalog | FR-CAT-1 |
 | GET | `/services/sync?since=` | — | — | `200` `{syncedAt, items[], deletedIds[]}` | catalog | FR-CAT-4 |
-| POST | `/payments/inquiry` | `X-User-Id`, `X-Session-Id` | `{serviceId, payload}` | `200` Inquiry | payment | FR-INQ |
-| POST | `/payments/confirm` | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` | `{inquiryId, payload}` | `200` Confirm result | payment | FR-PAY |
+| POST | `/payments/inquiry` | `X-User-Id` | `{serviceId, payload}` | `200` Inquiry | payment | FR-INQ |
+| POST | `/payments/confirm` | `X-User-Id`, `Idempotency-Key` | `{inquiryId, payload}` | `200` Confirm result | payment | FR-PAY |
 | GET | `/payments/transactions?page=&size=` | `X-User-Id` | — | `200` Page | transaction | FR-TXN-1 |
 | GET | `/payments/transactions/{id}` | `X-User-Id` | — | `200` Receipt | transaction | FR-TXN-3 |
 
@@ -235,25 +232,9 @@ Full schemas, examples and per-endpoint error lists are in LLD §6.
 
 ## 8. Key runtime flows
 
-### 8.1 Create a session (key issuance)
+### 8.1 The payload key (no sessions)
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App
-    participant API as SessionController/Service
-    participant KW as KeyWrapper
-    participant DB as PostgreSQL
-
-    App->>API: POST /sessions (X-User-Id: usr_01)
-    API->>API: rate-limit check (5/min/user)
-    API->>API: key = SecureRandom 32 bytes
-    API->>KW: wrap(key) with MASTER_KEY (AES-GCM)
-    KW-->>API: wrappedKey
-    API->>DB: INSERT sessions(id, user_id, wrapped_key, expires_at=now+30m)
-    API-->>App: 201 {sessionId, sessionKey: base64(key), expiresAt}
-    Note over App: Key kept in memory only.<br/>Discarded on DELETE /sessions or app kill.
-```
+There is no key-issuance flow. The backend track generates one AES-256 key (`openssl rand -base64 32`), sets it as `APP_PAYLOAD_KEY`, and gives the same value to both client tracks, who build it into their apps. `PayloadKey` validates it at startup (32 bytes) and hands a copy to `PayloadDecryptor` for each request. Rotating the key means changing the environment variable and shipping new app builds together.
 
 ### 8.2 Catalogue: first load and delta sync
 
@@ -287,16 +268,16 @@ sequenceDiagram
     participant ENG as MockPaymentEngine + FeeCalculator
     participant DB as PostgreSQL
 
-    App->>App: payload = AES-GCM(sessionKey, {subscriberNumber, nonce, ts}) with fresh IV
-    App->>IS: POST /payments/inquiry {serviceId, payload}<br/>X-User-Id, X-Session-Id
+    App->>App: payload = AES-GCM(shared key, {subscriberNumber, nonce, ts}) with fresh IV
+    App->>IS: POST /payments/inquiry {serviceId, payload}<br/>X-User-Id
     IS->>DB: load service
     alt unknown
         IS-->>App: 404 SERVICE_NOT_FOUND
     else inactive
         IS-->>App: 503 SERVICE_UNAVAILABLE
     end
-    IS->>PD: decrypt(sessionId, userId, payload)
-    PD->>DB: load session (owner, expiry), unwrap key
+    IS->>PD: decrypt(payload)
+    PD->>PD: take the static key from PayloadKey
     PD->>PD: AES-GCM decrypt (tag verified)
     PD->>RG: check |now - ts| ≤ 120s and nonce unseen
     RG->>DB: INSERT used_nonces(nonce) — PK violation ⇒ replay
@@ -328,7 +309,7 @@ sequenceDiagram
     participant ENG as MockPaymentEngine
     participant DB as PostgreSQL
 
-    App->>CS: POST /payments/confirm {inquiryId, payload}<br/>Idempotency-Key: K, X-User-Id, X-Session-Id
+    App->>CS: POST /payments/confirm {inquiryId, payload}<br/>Idempotency-Key: K, X-User-Id
     CS->>CS: rate-limit check (5/min/user)
     CS->>DB: SELECT transaction WHERE user_id=? AND idempotency_key=K
     alt exists
@@ -401,13 +382,10 @@ stateDiagram-v2
 
 ```mermaid
 erDiagram
-    USERS ||--o{ SESSIONS : "creates"
     USERS ||--o{ INQUIRIES : "requests"
     USERS ||--o{ TRANSACTIONS : "owns"
     SERVICES ||--o{ INQUIRIES : "billed by"
     SERVICES ||--o{ TRANSACTIONS : "paid to"
-    SESSIONS ||--o{ INQUIRIES : "encrypted with"
-    SESSIONS ||--o{ USED_NONCES : "consumed"
     INQUIRIES ||--o{ TRANSACTIONS : "settled by (≤1 success/pending)"
 
     USERS {
@@ -430,16 +408,8 @@ erDiagram
         timestamptz updated_at
         timestamptz deleted_at
     }
-    SESSIONS {
-        varchar id PK
-        varchar user_id FK
-        bytea wrapped_key
-        timestamptz expires_at
-        timestamptz revoked_at
-    }
     USED_NONCES {
         varchar nonce PK
-        varchar session_id FK
         timestamptz created_at
     }
     INQUIRIES {
@@ -483,9 +453,9 @@ The full DDL, indexes and constraints are in LLD §4.
 | 1 | TLS 1.2+ with a self-signed certificate. Clients pin the SPKI SHA-256 (live + backup). | Network eavesdropping, MITM with a rogue CA. | Tomcat, clients |
 | 2 | AES-256-GCM payload encryption of the subscriber number and PIN. | An intermediary that terminates TLS and logs bodies (proxy, load balancer, APM). | `PayloadDecryptor` |
 | 3 | Replay guard: `ts` within ±120 s and single-use `nonce` (kept 5 min). | Captured-payload replay. | `ReplayGuard`, `used_nonces` |
-| 4 | Session keys wrapped with `APP_MASTER_KEY` (AES-GCM) at rest, 30-min TTL, owner-bound, revocable. | A database dump that reveals live keys. | `KeyWrapper`, `sessions` |
+| 4 | The payload key lives only in the environment (`APP_PAYLOAD_KEY`), is validated at startup and is never stored in the database or logged. | The key leaking through the repository, the database or logs. | `PayloadKey` |
 | 5 | PIN stored as a bcrypt hash (cost 12). 3 wrong PINs invalidate the inquiry. | PIN disclosure, brute force per inquiry. | `ConfirmService` |
-| 6 | Rate limits: 5/min/user on `/sessions` and `/payments/confirm`. | PIN brute force, key-issuance abuse. | `RateLimitInterceptor` |
+| 6 | Rate limit: 5/min/user on `/payments/confirm`. | PIN brute force. | `RateLimitInterceptor` |
 | 7 | Log hygiene: no PIN, key, payload or full subscriber number in logs. | Secrets leaking through logs. | Logback config, `Masking` |
 | 8 | Secrets only from the environment. `.env` and `certs/` are git-ignored. | Secrets leaking through the repository. | Config |
 
@@ -494,14 +464,14 @@ The full DDL, indexes and constraints are in LLD §4.
 ```
 plaintext  = UTF-8 JSON { ...fields, "nonce": <32 hex>, "ts": <unix seconds> }
 iv         = 12 random bytes (new for EVERY message)
-ct ‖ tag   = AES-256-GCM(key = sessionKey, iv, plaintext), tag = 128 bits, no AAD
+ct ‖ tag   = AES-256-GCM(key = shared payload key, iv, plaintext), tag = 128 bits, no AAD
 wire       = base64( iv ‖ ct ‖ tag )
 ```
 
 Server decrypt path: base64-decode → length ≥ 12 + 16 → split IV → `Cipher("AES/GCM/NoPadding")` with `GCMParameterSpec(128, iv)` → `AEADBadTagException` ⇒ `DECRYPTION_FAILED` → parse JSON → ts window → nonce insert.
 
 ### 10.3 No-auth threat note
-Because `X-User-Id` is trusted (SRS L-1), controls 2–6 **do not** stop a malicious caller from acting as another user. They protect data in transit and at rest, and slow down brute force. This is deliberate and documented for the final review. `CurrentUserArgumentResolver` is the single place where real authentication would be added later (for example, resolving the user from a verified JWT instead of a header).
+Because `X-User-Id` is trusted (SRS L-1) and the payload key is shared by every client (SRS L-2), controls 2–6 **do not** stop a malicious caller from acting as another user. They protect data in transit and at rest, and slow down brute force. This is deliberate and documented for the final review. `CurrentUserArgumentResolver` is the single place where real authentication would be added later (for example, resolving the user from a verified JWT instead of a header).
 
 ---
 
@@ -526,8 +496,8 @@ Because `X-User-Id` is trusted (SRS L-1), controls 2–6 **do not** stop a malic
 | Format | Logback, one line per event to stdout. Pattern includes `%X{requestId}`, level and logger. |
 | Correlation | `RequestIdFilter` puts `X-Request-Id` in the MDC and clears it after the request. |
 | Access log | One summary line per request: method, path template, status, duration, platform, version, user ID. **No bodies.** |
-| Business events | `inquiry.created`, `payment.confirmed`, `payment.replayed`, `payment.pin_failed`, `session.created`. Each logs IDs and a masked subscriber number (`******0891`) only. |
-| Forbidden in logs | PIN, `sessionKey`, `payload` (encrypted or decrypted), `APP_MASTER_KEY`, DB password. |
+| Business events | `inquiry.created`, `payment.confirmed`, `payment.replayed`, `payment.pin_failed`. Each logs IDs and a masked subscriber number (`******0891`) only. |
+| Forbidden in logs | PIN, `payload` (encrypted or decrypted), `APP_PAYLOAD_KEY`, DB password. |
 | Verification | `LogHygieneTest` runs the full payment flow with a captured appender and asserts that the forbidden strings never appear. Interns also `grep` their logs as a review item. |
 | Health | Spring Boot Actuator `health` only. No other actuator endpoints are exposed. |
 
@@ -538,15 +508,14 @@ Because `X-User-Id` is trusted (SRS L-1), controls 2–6 **do not** stop a malic
 | Variable | Purpose | Example (`.env.example`) |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | PostgreSQL connection | `db`, `5432`, `momknpay`, `momknpay`, `change-me` |
-| `APP_MASTER_KEY` | base64 32-byte key that wraps session keys | `openssl rand -base64 32` |
+| `APP_PAYLOAD_KEY` | base64 32-byte AES key that encrypts payloads; the same value is built into the apps | `openssl rand -base64 32` |
 | `TLS_KEYSTORE_PATH`, `TLS_KEYSTORE_PASSWORD` | PKCS#12 keystore | `/certs/keystore.p12`, `change-me` |
-| `APP_SESSION_TTL` | Session lifetime | `PT30M` |
 | `APP_INQUIRY_TTL` | Inquiry lifetime | `PT5M` |
 | `APP_REPLAY_WINDOW` | Allowed `ts` skew | `PT120S` |
 | `APP_SLOW_DELAY` | `_slow` delay | `PT8S` |
 | `APP_PENDING_DELAY` | PENDING → SUCCESS delay | `PT10S` |
 
-The application **fails fast at startup** if `APP_MASTER_KEY` is missing or does not decode to 32 bytes.
+The application **fails fast at startup** if `APP_PAYLOAD_KEY` is missing or does not decode to 32 bytes.
 
 ---
 
