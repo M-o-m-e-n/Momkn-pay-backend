@@ -18,6 +18,9 @@ public final class TestCrypto {
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /** The static payload key configured for tests (app.payload-key): bytes 0x00..0x1f. */
+    public static final String TEST_PAYLOAD_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+
     private TestCrypto() {}
 
     /** A fresh nonce: 16 random bytes as 32 lowercase hex characters. */
@@ -32,9 +35,9 @@ public final class TestCrypto {
     }
 
     /** base64( iv[12] ‖ AES-256-GCM(json) ‖ tag[16] ), fresh IV, no AAD. */
-    public static String encrypt(String sessionKeyBase64, String json) {
+    public static String encrypt(String keyBase64, String json) {
         try {
-            byte[] key = Base64.getDecoder().decode(sessionKeyBase64);
+            byte[] key = Base64.getDecoder().decode(keyBase64);
             byte[] iv = new byte[12];
             RANDOM.nextBytes(iv);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");

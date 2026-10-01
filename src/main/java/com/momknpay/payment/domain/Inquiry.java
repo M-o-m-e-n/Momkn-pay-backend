@@ -30,9 +30,6 @@ public class Inquiry {
     @JoinColumn(name = "service_id", nullable = false, updatable = false)
     private BillerService service;
 
-    @Column(name = "session_id", updatable = false)
-    private String sessionId;
-
     @Column(name = "subscriber_number", nullable = false, updatable = false, length = 32)
     private String subscriberNumber;
 
@@ -79,7 +76,6 @@ public class Inquiry {
             String id,
             String userId,
             BillerService service,
-            String sessionId,
             String subscriberNumber,
             String customerName,
             String billMonth,
@@ -92,7 +88,6 @@ public class Inquiry {
         this.id = id;
         this.userId = userId;
         this.service = service;
-        this.sessionId = sessionId;
         this.subscriberNumber = subscriberNumber;
         this.customerName = customerName;
         this.billMonth = billMonth;
@@ -133,10 +128,6 @@ public class Inquiry {
 
     public BillerService getService() {
         return service;
-    }
-
-    public String getSessionId() {
-        return sessionId;
     }
 
     public String getSubscriberNumber() {

@@ -4,7 +4,7 @@
 |---|---|
 | Document | Software Requirements Specification |
 | Product | Momkn Pay — Backend API |
-| Version | 1.0 (contract `v1`) |
+| Version | 2.0 (contract v2.0.0, paths under `/v1`) |
 | Date | 2026-09-30 |
 | Status | Draft for contract freeze |
 | Related documents | [HLD.md](HLD.md), [LLD.md](LLD.md), *Momkn Pay — Internship Capstone Project Brief* (PDF), *Design.pdf* (sample UI) |
@@ -54,8 +54,7 @@ Momkn Pay is a **simulated** bill-payment system for Egyptian utility services: 
 | **Confirm** | Paying an open inquiry with a PIN. It creates one transaction. |
 | **Transaction** | The record of a payment attempt, with status `SUCCESS`, `FAILED` or `PENDING`. |
 | **Idempotency key** | A client-generated UUID sent on confirm. The same key always maps to the same transaction. |
-| **Session** | A short-lived crypto context created by `POST /sessions`. It holds the AES key used to encrypt payloads. It is *not* an authentication session. |
-| **Session key** | 32 random bytes (AES-256 key), returned once in base64 when a session is created. |
+| **Payload key** | The static AES-256 key (base64 of 32 bytes) that encrypts request payloads. One key for every client: it is configured on the server (`APP_PAYLOAD_KEY`) and built into the apps. There are no sessions (ADR-011). |
 | **Nonce** | 16 random bytes (hex) inside each encrypted payload, used to detect replays. |
 | **AES-GCM** | Advanced Encryption Standard in Galois/Counter Mode: authenticated encryption. |
 | **SPKI** | Subject Public Key Info. Clients pin its SHA-256 hash. |
@@ -90,7 +89,7 @@ The backend owns the API contract (OpenAPI 3.1), the database, the mock payment 
 ### 2.2 Product functions (summary)
 | # | Function | Area |
 |---|---|---|
-| P1 | Create and end crypto sessions | Sessions |
+| P1 | Decrypt payloads encrypted with the shared key, and reject replays | Payload encryption |
 | P2 | View and edit the user profile | Profile |
 | P3 | Full catalogue and delta sync | Catalogue |
 | P4 | Fees inquiry with encrypted subscriber number | Payments |
@@ -141,23 +140,21 @@ Each requirement has acceptance criteria (AC) that a test or Postman request can
 | FR-COM-1 | Every API request MUST carry `X-Request-Id` (UUID), `X-Client-Platform` (`ios` \| `android`) and `X-Client-Version` (non-empty). If one is missing or invalid, the response is `400 VALIDATION_ERROR` with `field` set to the header name. Swagger UI, the OpenAPI JSON and the health endpoint are exempt. |
 | FR-COM-2 | The server MUST echo `X-Request-Id` in the response headers and include it in every log line for that request. |
 | FR-COM-3 | Every non-2xx response MUST use the error envelope (§4.3), including unhandled exceptions, unknown routes and malformed JSON. |
-| FR-COM-4 | User-scoped endpoints (sessions, profile, payments, transactions) MUST require `X-User-Id`. A missing header gives `400 VALIDATION_ERROR` (`field: "X-User-Id"`). An unknown user gives `404 USER_NOT_FOUND`. |
+| FR-COM-4 | User-scoped endpoints (profile, payments, transactions) MUST require `X-User-Id`. A missing header gives `400 VALIDATION_ERROR` (`field: "X-User-Id"`). An unknown user gives `404 USER_NOT_FOUND`. |
 | FR-COM-5 | Unknown JSON properties in request bodies MUST be rejected with `400 VALIDATION_ERROR` naming the property. |
 
-### 3.2 Sessions — encryption key issuance (FR-SES)
+### 3.2 Payload encryption — static shared key (FR-ENC)
 
-The session replaces "session key issued at login" from the brief. It exists only to share the AES-256 key used to encrypt the subscriber number and PIN.
+There are **no sessions** (ADR-011). The brief's "session key issued at login" is replaced by one static AES-256 key that the backend track generates once and shares with both client tracks. It exists to encrypt the subscriber number and the PIN.
 
 | ID | Requirement |
 |---|---|
-| FR-SES-1 | `POST /sessions` (with `X-User-Id`) MUST create a session and return `sessionId`, `sessionKey` (base64 of 32 cryptographically random bytes) and `expiresAt`. |
-| FR-SES-2 | A session MUST expire 30 minutes after creation. Using an expired session gives `410 SESSION_EXPIRED`. |
-| FR-SES-3 | The session key MUST be returned **only once**, in the create response. No endpoint can read it back. |
-| FR-SES-4 | A session belongs to the user that created it. Using it with a different `X-User-Id` gives `404 SESSION_NOT_FOUND`, which does not reveal that the session exists. |
-| FR-SES-5 | `DELETE /sessions/{sessionId}` MUST revoke the session immediately (`204`). Later use gives `404 SESSION_NOT_FOUND`. |
-| FR-SES-6 | `POST /sessions` MUST be rate-limited to 5 requests per minute per `X-User-Id` (`429 RATE_LIMITED`). |
+| FR-ENC-1 | The server MUST read the key from configuration (`APP_PAYLOAD_KEY`, base64 of 32 bytes) and MUST refuse to start if it is missing, not base64, or not 32 bytes. |
+| FR-ENC-2 | `payload` fields on inquiry and confirm MUST be decrypted with that key (AES-256-GCM, §4.5). A payload that does not decrypt gives `400 DECRYPTION_FAILED`. |
+| FR-ENC-3 | A payload whose `ts` is more than 120 seconds from server time, or whose `nonce` was already used, MUST be rejected with `400 DECRYPTION_FAILED`. A nonce stays consumed whatever the outcome of the request. |
+| FR-ENC-4 | No endpoint returns the key, and it MUST never be logged. |
 
-**AC:** Create → use for inquiry → succeeds. Wait for expiry (or revoke) → inquiry fails with the right code. A session of user A used with `X-User-Id` of user B → 404.
+**AC:** A payload encrypted with the configured key decrypts. One encrypted with any other key, tampered with, sent twice, or older than 120 s gives `DECRYPTION_FAILED`.
 
 ### 3.3 Profile (FR-PRO)
 
@@ -185,7 +182,7 @@ The session replaces "session key issued at login" from the brief. It exists onl
 
 | ID | Requirement |
 |---|---|
-| FR-INQ-1 | `POST /payments/inquiry` MUST accept `{ serviceId, payload }` with headers `X-User-Id` and `X-Session-Id`. `payload` is the AES-GCM-encrypted JSON `{ subscriberNumber, nonce, ts }`. |
+| FR-INQ-1 | `POST /payments/inquiry` MUST accept `{ serviceId, payload }` with the `X-User-Id` header. `payload` is the AES-GCM-encrypted JSON `{ subscriberNumber, nonce, ts }`. |
 | FR-INQ-2 | The server MUST decrypt and validate the payload according to FR-SEC-1…6 before any business logic runs. |
 | FR-INQ-3 | `subscriberNumber` MUST match the service's `inputPattern`. Otherwise the response is `400 VALIDATION_ERROR` (`field: "subscriberNumber"`). |
 | FR-INQ-4 | An unknown `serviceId` gives `404 SERVICE_NOT_FOUND`. An inactive service gives `503 SERVICE_UNAVAILABLE`. |
@@ -193,13 +190,13 @@ The session replaces "session key issued at login" from the brief. It exists onl
 | FR-INQ-6 | A successful response MUST contain `inquiryId`, `serviceId`, `customerName`, `billMonth` (`YYYY-MM`), `amountDue`, `serviceFee`, `vat`, `total`, `currency` (`"EGP"`) and `expiresAt`. |
 | FR-INQ-7 | `serviceFee`, `vat` and `total` MUST be computed with the fee formula (§6.3), on the server, in integer piastres. |
 | FR-INQ-8 | An inquiry MUST expire 5 minutes after creation (`expiresAt`). |
-| FR-INQ-9 | The inquiry MUST be persisted with the user, service, session, subscriber number, amounts, the resolved mock rule and its expiry. |
+| FR-INQ-9 | The inquiry MUST be persisted with the user, service, subscriber number, amounts, the resolved mock rule and its expiry. |
 
 ### 3.6 Payment confirmation (FR-PAY)
 
 | ID | Requirement |
 |---|---|
-| FR-PAY-1 | `POST /payments/confirm` MUST accept `{ inquiryId, payload }` with headers `X-User-Id`, `X-Session-Id` and **`Idempotency-Key` (UUID, required)**. `payload` decrypts to `{ pin, nonce, ts }`. |
+| FR-PAY-1 | `POST /payments/confirm` MUST accept `{ inquiryId, payload }` with headers `X-User-Id` and **`Idempotency-Key` (UUID, required)**. `payload` decrypts to `{ pin, nonce, ts }`. |
 | FR-PAY-2 | **Idempotency:** if a transaction already exists for (`X-User-Id`, `Idempotency-Key`), the server MUST return that transaction, rebuilt from its current state, **without** decrypting the payload or creating a new transaction. A success or pending result returns `200`. A failed result returns the same error envelope as the first time. |
 | FR-PAY-3 | Reusing an `Idempotency-Key` with a **different** `inquiryId` gives `409 IDEMPOTENCY_CONFLICT`. |
 | FR-PAY-4 | Two concurrent requests with the same key MUST produce exactly one transaction. |
@@ -247,8 +244,7 @@ The session replaces "session key issued at login" from the brief. It exists onl
 | `X-Request-Id` | Request and response | All API calls | UUID |
 | `X-Client-Platform` | Request | All API calls | `ios` \| `android` |
 | `X-Client-Version` | Request | All API calls | Free text, for example `1.0.3` |
-| `X-User-Id` | Request | Sessions, profile, payments, transactions | User ID, for example `usr_01` |
-| `X-Session-Id` | Request | `/payments/inquiry`, `/payments/confirm` | Session ID |
+| `X-User-Id` | Request | Profile, payments, transactions | User ID, for example `usr_01` |
 | `Idempotency-Key` | Request | `/payments/confirm` | UUID |
 | `Retry-After` | Response | `429` responses | Seconds |
 
@@ -276,7 +272,6 @@ Clients switch on `code`, never on the message text. `field` names the offending
 | `DECRYPTION_FAILED` | 400 | Bad blob, wrong key, tampered ciphertext, stale `ts` or replayed `nonce`. |
 | `INSUFFICIENT_BALANCE` | 402 | Simulated decline (mock rule 7). |
 | `USER_NOT_FOUND` | 404 | `X-User-Id` does not match a user. |
-| `SESSION_NOT_FOUND` | 404 | Unknown, revoked or foreign session. |
 | `SERVICE_NOT_FOUND` | 404 | Unknown `serviceId`. |
 | `SUBSCRIBER_NOT_FOUND` | 404 | No bill for that number (mock rule 0). |
 | `INQUIRY_NOT_FOUND` | 404 | Unknown or foreign inquiry. |
@@ -287,7 +282,6 @@ Clients switch on `code`, never on the message text. `field` names the offending
 | `EMAIL_ALREADY_USED` | 409 | Profile email conflict. |
 | `IDEMPOTENCY_CONFLICT` | 409 | Key reused for a different inquiry. |
 | `INQUIRY_ALREADY_CONFIRMED` | 409 | The inquiry already has a successful or pending transaction. |
-| `SESSION_EXPIRED` | 410 | Past the session's `expiresAt`. |
 | `INQUIRY_EXPIRED` | 410 | Past the inquiry's `expiresAt`. |
 | `INQUIRY_INVALIDATED` | 410 | Three wrong PINs on this inquiry. |
 | `AMOUNT_OUT_OF_RANGE` | 422 | `amountDue` outside the service's `[minAmount, maxAmount]` (mock rule 6). |
@@ -297,7 +291,7 @@ Clients switch on `code`, never on the message text. `field` names the offending
 
 ### 4.5 Encrypted payload format (shared with clients)
 - Algorithm: AES-256-GCM, 12-byte random IV per message, 128-bit tag, no additional authenticated data (AAD).
-- Key: the `sessionKey` of the session named in `X-Session-Id`.
+- Key: the static shared payload key (`APP_PAYLOAD_KEY`), the same for every client.
 - Wire format: `base64( iv(12) ‖ ciphertext ‖ tag(16) )`, standard base64 with padding.
 - Plaintext: UTF-8 JSON that always contains `nonce` (32 hex characters = 16 random bytes) and `ts` (Unix seconds).
 
@@ -305,16 +299,14 @@ Clients switch on `code`, never on the message text. `field` names the offending
 
 | # | Method | Path | User header | Purpose |
 |---|---|---|---|---|
-| 1 | POST | `/sessions` | `X-User-Id` | Create a crypto session and return the AES key |
-| 2 | DELETE | `/sessions/{sessionId}` | `X-User-Id` | Revoke a session |
-| 3 | GET | `/profile` | `X-User-Id` | Current user's profile |
-| 4 | PATCH | `/profile` | `X-User-Id` | Update name and email |
-| 5 | GET | `/services` | — | Full catalogue |
-| 6 | GET | `/services/sync?since=` | — | Delta since a timestamp |
-| 7 | POST | `/payments/inquiry` | `X-User-Id`, `X-Session-Id` | Fees inquiry (encrypted body) |
-| 8 | POST | `/payments/confirm` | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` | Pay (encrypted body, idempotent) |
-| 9 | GET | `/payments/transactions?page=&size=` | `X-User-Id` | History |
-| 10 | GET | `/payments/transactions/{id}` | `X-User-Id` | Single receipt |
+| 1 | GET | `/profile` | `X-User-Id` | Current user's profile |
+| 2 | PATCH | `/profile` | `X-User-Id` | Update name and email |
+| 3 | GET | `/services` | — | Full catalogue |
+| 4 | GET | `/services/sync?since=` | — | Delta since a timestamp |
+| 5 | POST | `/payments/inquiry` | `X-User-Id` | Fees inquiry (encrypted body) |
+| 6 | POST | `/payments/confirm` | `X-User-Id`, `Idempotency-Key` | Pay (encrypted body, idempotent) |
+| 7 | GET | `/payments/transactions?page=&size=` | `X-User-Id` | History |
+| 8 | GET | `/payments/transactions/{id}` | `X-User-Id` | Single receipt |
 
 Tooling endpoints (outside `/v1`, no custom headers needed): `GET /docs` (Swagger UI), `GET /v3/api-docs` (OpenAPI JSON), `GET /actuator/health`.
 
@@ -329,12 +321,12 @@ Tooling endpoints (outside `/v1`, no custom headers needed): `GET /docs` (Swagge
 | NFR-SEC-1 | Payload encryption MUST use AES-256-GCM with a fresh 12-byte IV per message and a 128-bit tag. The server MUST never write its own padding or MAC and never use ECB mode. |
 | NFR-SEC-2 | The server MUST reject a payload whose `ts` differs from server time by more than 120 seconds, or whose `nonce` has already been seen, with `DECRYPTION_FAILED`. |
 | NFR-SEC-3 | Seen nonces MUST be retained for at least 5 minutes (longer than the ts window, so a replay can never slip through). |
-| NFR-SEC-4 | Session keys MUST be generated with a CSPRNG (`SecureRandom`) and stored **wrapped** (AES-GCM encrypted) with a master key from the environment. They are never stored in plaintext. |
+| NFR-SEC-4 | The payload key MUST come only from the environment (`APP_PAYLOAD_KEY`), never from the repository, and MUST be validated at startup (32 bytes). Because every client shares it, it is treated as an obfuscation layer against intermediaries and logs, not as a secret that survives an app being reverse-engineered. |
 | NFR-SEC-5 | PINs MUST be stored only as bcrypt hashes (cost ≥ 12). |
-| NFR-SEC-6 | Logs MUST never contain the PIN, session key, encrypted or decrypted payloads, or the master key. The subscriber number MUST be masked in logs (last 4 digits only). |
+| NFR-SEC-6 | Logs MUST never contain the PIN, the payload key, or encrypted or decrypted payloads. The subscriber number MUST be masked in logs (last 4 digits only). |
 | NFR-SEC-7 | No secret, key or certificate private key in the repository. Configuration comes from environment variables, and `.env.example` documents them. |
 | NFR-SEC-8 | TLS is mandatory. The SPKI hash of the live key and of a backup key are published for pinning. |
-| NFR-SEC-9 | Rate limits: 5/min per user on `/sessions` and `/payments/confirm`. |
+| NFR-SEC-9 | Rate limit: 5/min per user on `/payments/confirm`. |
 | NFR-SEC-10 | Error responses MUST NOT leak stack traces, SQL or internal class names. |
 
 ### 5.2 Reliability and data integrity (NFR-REL)
@@ -452,8 +444,8 @@ total      = amountDue + serviceFee + vat
 
 | # | Limitation | Consequence | What a real product would do |
 |---|---|---|---|
-| L-1 | No authentication. `X-User-Id` is trusted. | Anyone who can reach the API can act as any user, read their profile and history, and create sessions for them. | OAuth2/OIDC or JWT with short-lived access tokens and refresh rotation. |
-| L-2 | The session key is issued over TLS to any caller. | The payload encryption protects against an intermediary that terminates TLS and logs bodies. It does **not** protect against a malicious caller. | Bind the key to an authenticated session or derive it via ECDH. |
+| L-1 | No authentication. `X-User-Id` is trusted. | Anyone who can reach the API can act as any user, read their profile and history, and attempt payments for them. | OAuth2/OIDC or JWT with short-lived access tokens and refresh rotation. |
+| L-2 | One static payload key is shared by every client and built into the apps. | Anyone who extracts it from an app build can read and forge payloads. The encryption protects against an intermediary that terminates TLS and logs bodies, **not** against a malicious caller. | A key per authenticated session, or an ECDH key agreement. |
 | L-3 | The PIN is the only secret that authorises a payment. | A 4-digit PIN is guessable. The limits (3 wrong PINs per inquiry, 5 confirms/min) only slow an attacker down. | Account lockout, device binding, step-up authentication. |
 | L-4 | In-memory rate limiting | Resets on restart and does not work across several instances. | Redis-backed distributed limiter. |
 
@@ -465,8 +457,8 @@ total      = amountDue + serviceFee + vat
 |---|---|---|
 | FR-COM-1…3 | `RequiredHeadersInterceptor`, `GlobalExceptionHandler` | `HeadersIT`, `ErrorEnvelopeIT` |
 | FR-COM-4 | `CurrentUserArgumentResolver` | `ProfileIT` |
-| FR-SES-1…5 | `POST/DELETE /sessions` | `SessionServiceTest`, `SessionIT` |
-| FR-SES-6, FR-PAY-11 | `RateLimitInterceptor` | `RateLimitIT` |
+| FR-ENC-1…4 | `PayloadKey`, `PayloadDecryptor`, `ReplayGuard` | `StartupValidationTest`, `PayloadDecryptorIT`, `ReplayGuardTest` |
+| FR-PAY-11 | `RateLimitInterceptor` | `RateLimitIT` |
 | FR-PRO-1…5 | `GET/PATCH /profile` | `ProfileIT` |
 | FR-CAT-1…7 | `GET /services`, `GET /services/sync` | `CatalogServiceTest`, `CatalogIT` |
 | FR-INQ-1…9 | `POST /payments/inquiry` | `InquiryServiceTest`, `PaymentFlowIT` |
@@ -487,11 +479,10 @@ total      = amountDue + serviceFee + vat
 | Brief | This SRS | Reason |
 |---|---|---|
 | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | **Removed** | The project has no auth module. |
-| `sessionKey` issued by login | `POST /sessions` issues `sessionId` + `sessionKey`. Requests send `X-Session-Id`. | The payload-encryption learning goal is kept without login. |
-| Logout clears the session key | `DELETE /sessions/{id}` | Same effect. |
+| `sessionKey` issued by login | One static shared key (`APP_PAYLOAD_KEY`), built into the apps. No sessions. | There is no login to issue a key, and the application is a mock (ADR-011, which replaced ADR-003's `POST /sessions`). |
 | `Authorization: Bearer` on protected calls | `X-User-Id` header | No tokens. |
 | `POST /profile/change-password` | **Removed** | Passwords have no use without login. |
-| `refresh_tokens` table | `sessions` table | Stores wrapped session keys. |
+| `refresh_tokens` table | **Removed** | Nothing to store: no tokens and no sessions. |
 | `INVALID_CREDENTIALS`, `TOKEN_EXPIRED`, `MOBILE_ALREADY_USED` | **Removed** | Auth-only errors. |
-| — | Added `USER_NOT_FOUND`, `SESSION_NOT_FOUND`, `SESSION_EXPIRED`, `SERVICE_NOT_FOUND`, `INQUIRY_NOT_FOUND`, `INQUIRY_INVALIDATED`, `INQUIRY_ALREADY_CONFIRMED`, `IDEMPOTENCY_CONFLICT`, `AMOUNT_OUT_OF_RANGE`, `TRANSACTION_NOT_FOUND`, `EMAIL_ALREADY_USED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL_ERROR` | Every failure path gets a distinct, switchable code. |
-| Rate limit on `/auth/login` | Rate limit on `/sessions` | Login no longer exists. `/sessions` is its nearest equivalent. |
+| — | Added `USER_NOT_FOUND`, `SERVICE_NOT_FOUND`, `INQUIRY_NOT_FOUND`, `INQUIRY_INVALIDATED`, `INQUIRY_ALREADY_CONFIRMED`, `IDEMPOTENCY_CONFLICT`, `AMOUNT_OUT_OF_RANGE`, `TRANSACTION_NOT_FOUND`, `EMAIL_ALREADY_USED`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `INTERNAL_ERROR` | Every failure path gets a distinct, switchable code. |
+| Rate limit on `/auth/login` | **Removed** | Login does not exist. Only `/payments/confirm` is rate-limited. |

@@ -50,7 +50,7 @@ public class OpenApiConfig {
                 .info(
                         new Info()
                                 .title("Momkn Pay API")
-                                .version("1.0.0")
+                                .version("2.0.0")
                                 .description(
                                         "Simulated bill-payment API. No authentication: the user"
                                                 + " is named by X-User-Id (ADR-001). Money is"

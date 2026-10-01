@@ -25,3 +25,6 @@ Thumbs.db
 # Postman desktop workspace files (per developer)
 postman/.postman/
 postman/postman/
+
+# personal Compose overrides (e.g. publishing the database port locally)
+docker-compose.override.yml

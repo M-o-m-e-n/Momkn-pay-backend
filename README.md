@@ -2,7 +2,7 @@
 
 Simulated bill-payment API for the Momkn Pay internship capstone: electricity, water, gas, internet, mobile top-up and landline. One backend, two native clients (iOS and Android) and one frozen API contract. No real money moves: a deterministic mock engine decides every payment outcome.
 
-> **No authentication module.** Every endpoint is public and the caller names the user with the `X-User-Id` header. This is a deliberate teaching trade-off (see [ADR-001](docs/DECISIONS.md)). **Do not deploy this anywhere real.**
+> **No authentication module and no sessions.** Every endpoint is public, the caller names the user with the `X-User-Id` header, and payloads are encrypted with one static key shared by every client. This is a deliberate teaching trade-off (see [ADR-001 and ADR-011](docs/DECISIONS.md)). **Do not deploy this anywhere real.**
 
 **Stack:** Java 25 · Spring Boot 4 · PostgreSQL 16 · Spring Data JPA · Flyway · Maven · Docker Compose
 
@@ -36,7 +36,7 @@ On Windows, run the commands below in **Git Bash**.
 # 1. configuration: copy the template and fill the three blanks
 cp .env.example .env
 #    DB_PASSWORD=<anything>
-#    APP_MASTER_KEY=<output of: openssl rand -base64 32>
+#    APP_PAYLOAD_KEY=<output of: openssl rand -base64 32>   (the same value is built into the apps)
 #    TLS_KEYSTORE_PASSWORD=<anything>
 
 # 2. TLS certificate, keystore and SPKI pins (written to certs/, never committed)
@@ -63,11 +63,18 @@ curl -k https://localhost/v1/services \
 - HTTPS only: there is no HTTP listener. `-k` skips certificate checks for curl; clients pin the certificate instead (see [Certificate and SPKI pins](#certificate-and-spki-pins)).
 - Stop with `docker compose down`. Add `-v` to also wipe the database, which is re-seeded on the next start.
 
-Every call needs `X-Request-Id` (a UUID), `X-Client-Platform` (`ios` or `android`) and `X-Client-Version`. Payment calls encrypt the subscriber number and the PIN, so the easiest way to exercise the whole flow is the Postman collection:
+Every call needs `X-Request-Id` (a UUID), `X-Client-Platform` (`ios` or `android`) and `X-Client-Version`. Payment calls encrypt the subscriber number and the PIN with the shared key, so the easiest way to exercise the whole flow is the Postman collection. It verifies the server certificate, so it is told to trust ours:
 
 ```bash
-npx newman run postman/momknpay.postman_collection.json --insecure --env-var "baseUrl=https://localhost/v1"
+npx newman run postman/momknpay.postman_collection.json --ssl-extra-ca-certs certs/cert.pem \
+  --env-var "payloadKey=$(grep '^APP_PAYLOAD_KEY=' .env | cut -d= -f2-)"
 ```
+
+In the Postman app: Settings → Certificates → CA certificates → select `certs/cert.pem`, then set the collection variable `payloadKey` to your `APP_PAYLOAD_KEY`.
+
+### The shared payload key
+
+`APP_PAYLOAD_KEY` is one AES-256 key for everyone: the server reads it from `.env`, and both apps have the same value built in. The backend track generates it **once** (`openssl rand -base64 32`) and gives it to the iOS and Android tracks privately, like the keystore — never through git. Changing it means shipping new app builds.
 
 ### Certificate and SPKI pins
 
@@ -85,20 +92,18 @@ curl --cacert certs/cert.pem --resolve api.momknpay.local:443:127.0.0.1 https://
 
 | Method | Path | Needs | Purpose |
 |---|---|---|---|
-| POST | `/v1/sessions` | `X-User-Id` | Create a crypto session: returns the AES-256 `sessionKey` (valid 30 min) |
-| DELETE | `/v1/sessions/{id}` | `X-User-Id` | Revoke a session |
 | GET | `/v1/profile` | `X-User-Id` | Current user's profile |
 | PATCH | `/v1/profile` | `X-User-Id` | Update full name and/or email (mobile is read-only) |
 | GET | `/v1/services` | — | Full catalogue (inactive services included, shown disabled) |
 | GET | `/v1/services/sync?since=` | — | Delta since the last `syncedAt`, plus `deletedIds` |
-| POST | `/v1/payments/inquiry` | `X-User-Id`, `X-Session-Id` | Fees inquiry: encrypted subscriber number → a 5-minute quote |
-| POST | `/v1/payments/confirm` | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` | Pay the quote with the encrypted PIN, at most once per key |
+| POST | `/v1/payments/inquiry` | `X-User-Id` | Fees inquiry: encrypted subscriber number → a 5-minute quote |
+| POST | `/v1/payments/confirm` | `X-User-Id`, `Idempotency-Key` | Pay the quote with the encrypted PIN, at most once per key |
 | GET | `/v1/payments/transactions?page=&size=` | `X-User-Id` | History, newest first |
 | GET | `/v1/payments/transactions/{id}` | `X-User-Id` | Receipt |
 
 - **Money** is always integer piastres (`25320` = 253.20 EGP).
 - **Time** is ISO 8601 UTC (`2026-09-20T10:00:00Z`).
-- **Errors** always use one envelope: `{"error":{"code","messageEn","messageAr","field"}}`. Clients switch on `code`. All 22 codes are listed in [SRS §4.4](docs/SRS.md).
+- **Errors** always use one envelope: `{"error":{"code","messageEn","messageAr","field"}}`. Clients switch on `code`. All 20 codes are listed in [SRS §4.4](docs/SRS.md).
 
 **The payment flow:**
 
@@ -106,7 +111,7 @@ curl --cacert certs/cert.pem --resolve api.momknpay.local:443:127.0.0.1 https://
 sequenceDiagram
     participant App
     participant API
-    App->>API: POST /sessions → sessionKey (memory only)
+    Note over App: the shared AES key is built into the app (no sessions)
     App->>API: POST /payments/inquiry {serviceId, AES-GCM(subscriberNumber, nonce, ts)}
     API-->>App: quote: amountDue, serviceFee, vat, total, expiresAt (+5 min)
     App->>API: POST /payments/confirm {inquiryId, AES-GCM(pin, nonce, ts)} + Idempotency-Key
@@ -175,9 +180,9 @@ flowchart LR
             direction TB
             F["RequestIdFilter → header check → rate limit"]
             C["Controllers (DTOs, validation)"]
-            S["Services: Session · Profile · Catalog · Inquiry · Confirm · Transaction"]
+            S["Services: Profile · Catalog · Inquiry · Confirm · Transaction"]
             E["MockPaymentEngine + FeeCalculator (pure)"]
-            X["PayloadDecryptor · ReplayGuard · AesGcmCipher · KeyWrapper"]
+            X["PayloadDecryptor · ReplayGuard · AesGcmCipher · PayloadKey"]
             R["Spring Data JPA repositories"]
             F --> C --> S
             S --> E
@@ -192,7 +197,7 @@ flowchart LR
 ```
 
 - **Layers:** controller → service → repository. Controllers never see entities or repositories (checked by `ArchitectureTest`).
-- **Feature packages:** `session`, `user`, `catalog`, `payment`, `transaction`, plus `common` for errors, web plumbing, crypto, rate limiting and utilities. There are no dependency cycles.
+- **Feature packages:** `payload`, `user`, `catalog`, `payment`, `transaction`, plus `common` for errors, web plumbing, crypto, rate limiting and utilities. There are no dependency cycles.
 - **One mechanism for each concern:**
   - Errors go through `ApiException` and `GlobalExceptionHandler`.
   - Time comes from `TimeProvider`/`Clock`.
@@ -214,11 +219,11 @@ This is a scaled-down **teaching** design. It covers four things, done properly:
 | Control | Where |
 |---|---|
 | **TLS only**, self-signed certificate; clients pin the SPKI hash (live + backup) | Tomcat, `scripts/generate-certs.sh` |
-| **AES-256-GCM payload encryption** of the subscriber number and PIN: fresh 12-byte IV per message, 16-byte tag, key per session | `AesGcmCipher`, `PayloadDecryptor` |
+| **AES-256-GCM payload encryption** of the subscriber number and PIN: fresh 12-byte IV per message, 16-byte tag, one static shared key | `AesGcmCipher`, `PayloadDecryptor` |
 | **Replay protection:** `ts` within ±120 s, and each nonce accepted once (a database primary key) | `ReplayGuard`, `used_nonces` |
-| **Keys at rest:** session keys are stored wrapped with `APP_MASTER_KEY` (AES-GCM, bound to the session id) | `KeyWrapper` |
+| **The payload key** comes only from the environment (`APP_PAYLOAD_KEY`), is checked at startup and is never stored in the database, logged or returned | `PayloadKey` |
 | **PIN:** bcrypt cost 12, never stored or logged; 3 wrong PINs invalidate the inquiry | `ConfirmService` |
-| **Rate limits:** 5/min per user on `POST /sessions` and `POST /payments/confirm` | `RateLimiter` |
+| **Rate limit:** 5/min per user on `POST /payments/confirm` | `RateLimiter` |
 | **Log hygiene:** no PIN, key, payload or full subscriber number in logs (`******0891`) | `LogHygieneIT`, logback config |
 | **Secrets:** only in `.env` and `certs/`, both git-ignored; gitleaks scans the history in CI | `.gitleaks.toml`, CI |
 
@@ -229,7 +234,7 @@ This is a scaled-down **teaching** design. It covers four things, done properly:
 Accepted because this is a teaching exercise ([SRS §8](docs/SRS.md)):
 
 1. **No authentication.** `X-User-Id` is trusted, so anyone who can reach the API can act as any user. Real auth would plug into `CurrentUserArgumentResolver` without changing controllers (ADR-002).
-2. **Anyone can obtain a session key for any user.** The payload encryption protects data in transit and in logs, not against a malicious caller.
+2. **One payload key is shared by every client and built into the apps.** Anyone who extracts it from an app build can read and forge payloads, and it cannot be rotated without new app builds. The encryption protects data from intermediaries and logs, not from a malicious caller.
 3. **A 4-digit PIN is the only payment control.** The rate limit and the 3-attempt rule only slow brute force down.
 4. **The rate limiter is in memory.** It resets on restart and is per instance.
 5. **Timeout behaviour is the clients' job.** The mock `_slow` delay makes the server late; it does not simulate a dropped connection.
@@ -246,13 +251,14 @@ The full list, with causes and alternatives, is in [docs/DECISIONS.md](docs/DECI
 |---|---|
 | 001 | No authentication module; every endpoint is public |
 | 002 | The user is identified by the `X-User-Id` header |
-| 003 | The AES key comes from `POST /sessions` (30 min, wrapped at rest) |
+| 003 | ~~The AES key comes from `POST /sessions`~~ — superseded by ADR-011 |
 | 004–005 | Users only from seed data; no passwords; the PIN is kept |
-| 006 | Rate-limit `/sessions` and `/payments/confirm` |
+| 006 | Rate-limit `/payments/confirm` |
 | 007 | One distinct error code per failure path |
 | 008 | Idempotency is checked before decryption |
 | 009 | Spring Boot + Java 25 |
 | 010 | Confirm gets a 500 ms latency budget; bcrypt stays at cost 12 |
+| 011 | No sessions; payloads are encrypted with one static shared key |
 
 ---
 
@@ -266,8 +272,8 @@ The full list, with causes and alternatives, is in [docs/DECISIONS.md](docs/DECI
 
 | Gate | What it checks |
 |---|---|
-| Unit tests (`*Test`, 88) | Engine, fees, crypto, replay guard, confirm outcomes, pending resolution, architecture rules, masking |
-| Integration tests (`*IT`, 110) | Real PostgreSQL via Testcontainers: every endpoint, every error code, concurrency, rate limits, log hygiene, schema constraints, seed data |
+| Unit tests (`*Test`, 87) | Engine, fees, crypto, replay guard, confirm outcomes, pending resolution, architecture rules, masking |
+| Integration tests (`*IT`, 99) | Real PostgreSQL via Testcontainers: every endpoint, every error code, concurrency, rate limits, log hygiene, schema constraints, seed data |
 | `OpenApiContractIT` | The generated spec matches the frozen `docs/openapi.yaml`: operations, status codes, headers, parameters, body shapes |
 | `ArchitectureTest` (ArchUnit) | Layering, no cycles, no floating-point money, time only from the clock, only `AesGcmCipher` uses `Cipher`, no insecure randomness |
 | Spotless | google-java-format (AOSP); `./mvnw spotless:apply` fixes it |
@@ -282,13 +288,13 @@ The full list, with causes and alternatives, is in [docs/DECISIONS.md](docs/DECI
 
 | Endpoint | p50 ms | p95 ms | Budget |
 |---|---|---|---|
-| `GET /services` | 9.8 | 16.6 | 300 |
-| `GET /services/sync` | 9.3 | 12.3 | 300 |
-| `GET /profile` | 6.9 | 10.4 | 300 |
-| `GET /payments/transactions` | 13.0 | 22.5 | 300 |
-| `GET /payments/transactions/{id}` | 16.4 | 35.6 | 300 |
-| `POST /payments/inquiry` | 29.6 | 50.3 | 300 |
-| `POST /payments/confirm` (10 samples, rate-limited) | 239.9 | 277.5 | 500 |
+| `GET /services` | 13.5 | 33.6 | 300 |
+| `GET /services/sync` | 17.6 | 42.8 | 300 |
+| `GET /profile` | 13.0 | 31.7 | 300 |
+| `GET /payments/transactions` | 20.0 | 56.3 | 300 |
+| `GET /payments/transactions/{id}` | 15.6 | 45.0 | 300 |
+| `POST /payments/inquiry` | 35.0 | 87.4 | 300 |
+| `POST /payments/confirm` (10 samples, rate-limited) | 236.2 | 405.2 | 500 |
 
 Confirm is dominated by the bcrypt cost-12 PIN check, which takes about 230 ms by itself. That is a deliberate security cost (ADR-010).
 
@@ -301,7 +307,7 @@ The contract is [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). It is mi
 - **Frozen since day 3.** A change needs an issue, sign-off from both client tracks, and a new changelog row inside `info.description` with a version bump. `OpenApiContractIT` fails the build if the code drifts from the file.
 - **Lint:** `npx @redocly/cli lint docs/openapi.yaml`
 - **Mock server** for client teams, no backend needed: `npx @stoplight/prism-cli mock docs/openapi.yaml` → `http://127.0.0.1:4010`
-- **Postman collection:** every endpoint and every mock rule, in folders 01–06. It spreads confirm calls across users to respect the rate limit and leaves `usr_02` empty.
+- **Postman collection:** every endpoint and every mock rule, in folders 01–05. It verifies the server certificate, needs the `payloadKey` variable, spreads confirm calls across users to respect the rate limit and leaves `usr_02` empty.
   - Encrypted payloads come from `postman/momkn-encrypt.js`, AES-256-GCM in plain JavaScript, because the Postman sandbox has none.
   - After editing that file, run `node scripts/verify-postman-crypto.js && node scripts/sync-postman-crypto.js`.
 
@@ -312,13 +318,13 @@ The contract is [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). It is mi
 ```
 ├── src/main/java/com/momknpay/
 │   ├── common/        config, error envelope, web filters/interceptors, crypto, rate limit, util
-│   ├── session/       crypto sessions, payload decryption, replay guard, cleanup jobs
+│   ├── payload/       payload decryption with the shared key, replay guard, nonce cleanup
 │   ├── user/          profile, current-user resolver
 │   ├── catalog/       services catalogue and delta sync
 │   ├── payment/       inquiry, confirm, mock engine, fee calculator
 │   ├── transaction/   history, receipts, pending resolution
 │   └── db/migration/  V3__SeedUsers (Java migration: bcrypt PINs)
-├── src/main/resources/db/migration/   V1 schema · V2 services · V4 history
+├── src/main/resources/db/migration/   V1 schema · V2 services · V4 history · V5 drop sessions
 ├── src/test/java/…    unit tests (*Test), integration tests (*IT), support helpers
 ├── docs/              SRS, HLD, LLD, coding standards, milestones, decisions, openapi.yaml
 ├── postman/           collection + AES-GCM helper

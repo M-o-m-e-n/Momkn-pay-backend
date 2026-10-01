@@ -31,6 +31,8 @@
 
 ---
 
+> **Superseded details:** this rehearsal ran on v1.0, which still had `APP_MASTER_KEY` and sessions. Since v2.0.0 (ADR-011) the variable is `APP_PAYLOAD_KEY` and Newman runs with `--ssl-extra-ca-certs certs/cert.pem` and a `payloadKey` variable; see §4.
+
 ## 2. Release checklist
 
 | # | Item | Status |
@@ -66,3 +68,19 @@ To publish once the remote exists:
 git push origin main --follow-tags
 # then copy docs/openapi.yaml and the Postman collection to momknpay-contract
 ```
+
+---
+
+## 4. Version 2.0.0 — sessions removed (M5)
+
+| Check | Result |
+|---|---|
+| `./mvnw verify` | ✅ 87 unit + 99 integration tests, coverage gate met |
+| Upgrade in place: migration V5 on an existing v1.0 database with data | ✅ applied, data kept |
+| `POST /v1/sessions` | ✅ `404 NOT_FOUND` |
+| Newman with certificate verification on and the shared key | ✅ 34/34 assertions |
+| Newman without trusting `certs/cert.pem` | ✅ refused: "self-signed certificate" |
+| Performance smoke test | ✅ within budget (confirm p95 405 ms of 500) |
+| Contract `docs/openapi.yaml` v2.0.0 matches the code and lints clean | ✅ |
+
+Still manual: telling both client tracks about the breaking change, giving them the shared key, and tagging `v2.0`.

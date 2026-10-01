@@ -18,6 +18,7 @@ curl -k https://localhost/actuator/health                # {"status":"UP"}
 
 - **Phones:** connect them to the same Wi-Fi as the laptop, and point `api.momknpay.local` at the laptop's IP.
 - **Certificate:** check the apps pin the SPKI hashes from `certs/pins.txt`. If you regenerated the certificate, both apps need the new pins.
+- **Payload key:** check both apps are built with the same key as `APP_PAYLOAD_KEY` in `.env`. A mismatch shows up as `DECRYPTION_FAILED` on every inquiry.
 - **Open windows:** a terminal with `docker compose logs -f api`, Swagger (`https://localhost/docs`) and Postman.
 - **Test accounts:** `usr_01` / PIN 1234 has history, `usr_02` / 1234 is fresh, `usr_03` / 9999 is for the wrong-PIN path.
 - **Rate limit:** 5 confirms per minute per user. Rehearse with different users, or wait a minute between runs.
@@ -38,7 +39,7 @@ curl -k https://localhost/actuator/health                # {"status":"UP"}
 | 4:00 | **Failure 3:** `usr_03` with PIN `1234` three times → "Too many wrong PIN attempts" | "The third wrong PIN invalidates the inquiry: `INQUIRY_INVALIDATED`." |
 | 4:30 | The API log window | "Look for a PIN, a key or a subscriber number: only `******0891`. `LogHygieneIT` enforces that on every build." |
 
-**Backup if the phones fail:** the Postman collection runs the same flow. Folders 04–06 cover every rule. Run it in Postman or with `npx newman run postman/momknpay.postman_collection.json --insecure --env-var "baseUrl=https://localhost/v1"`.
+**Backup if the phones fail:** the Postman collection runs the same flow. Folders 03–05 cover every rule. Run it in Postman (trust `certs/cert.pem` and set `payloadKey`), or with the Newman command in the README.
 
 ---
 
@@ -53,9 +54,9 @@ Each intern answers one of these at the final review. The answer is shown in the
 | What stops someone replaying a captured payload? | `ts` must be within ±120 s, and each `nonce` is accepted once (a primary key in `used_nonces`). The nonce stays consumed even if the payment then fails. | `ReplayGuard` (`REQUIRES_NEW`), `PayloadDecryptorIT` |
 | Why is the idempotency key checked before decryption? | A genuine retry resends the same bytes, so the same nonce. Decrypting first would reject it as a replay, and the user would never get the receipt. | `ConfirmService` step 1, ADR-008 |
 | How do we know two simultaneous retries can't pay twice? | Row lock on the inquiry, a re-check of the key under the lock, and the `ux_txn_idempotency` unique constraint as the backstop. | `ConcurrencyIT` (10 parallel requests → 1 row) |
-| Where is the session key stored, and what if the database leaks? | Only wrapped with `APP_MASTER_KEY`, bound to the session id, and it expires after 30 min. A dump without the master key yields no usable keys. | `KeyWrapper`, `sessions.wrapped_key` |
+| Where does the encryption key come from, and who has it? | One static AES-256 key in `APP_PAYLOAD_KEY`, validated at startup and never stored in the database or logged. The same key is built into both apps, so anyone who extracts it from an app build can read and forge payloads (ADR-011). | `PayloadKey`, `StartupValidationTest` |
 | Why bcrypt cost 12 when it makes confirm slower? | The cost is what makes a leaked hash expensive to brute-force, which matters most for a 4-digit PIN. It is about 230 ms per check, accepted in ADR-010. | `CoreConfig.pinEncoder`, ADR-010 |
-| Is this API secure? | **No.** There is no authentication, so anyone can send any `X-User-Id` and get a session key for that user. The encryption protects data in transit and in logs, not against a malicious caller. A real product needs real auth (OAuth2/OIDC), device binding and more. | README "Known limitations", ADR-001 |
+| Is this API secure? | **No.** There is no authentication, so anyone can send any `X-User-Id`, and every client shares one payload key. The encryption protects data in transit and in logs, not against a malicious caller. A real product needs real auth (OAuth2/OIDC), device binding and more. | README "Known limitations", ADR-001 |
 | What does certificate pinning protect against, and how do you prove it works? | A trusted-but-wrong CA or an intercepting proxy. It's proven only by running the app through mitmproxy/Charles with its CA trusted and watching the connection fail. | Client apps; `certs/pins.txt` |
 | Why integer piastres? | Floating point can't represent 0.1 exactly; 45.50 could become 45.499999. Every amount is a `long`, and rounding uses `Math.ceilDiv`. | `FeeCalculator`, `ArchitectureTest.noFloatingPointFields` |
 

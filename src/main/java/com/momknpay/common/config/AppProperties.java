@@ -12,8 +12,8 @@ import org.springframework.validation.annotation.Validated;
  * All {@code app.*} settings in one typed place (CODING_STANDARDS §6). Startup fails if any is
  * missing or invalid.
  *
- * @param masterKey base64 of 32 bytes; wraps session keys at rest (never logged)
- * @param sessionTtl lifetime of a crypto session
+ * @param payloadKey base64 of 32 bytes; the static AES-256 key shared with the apps (ADR-011),
+ *     never logged
  * @param inquiryTtl lifetime of a fees inquiry
  * @param replayWindow allowed difference between a payload's {@code ts} and server time
  * @param nonceRetention how long consumed nonces are kept (must exceed the replay window)
@@ -23,8 +23,7 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties("app")
 public record AppProperties(
-        @NotBlank String masterKey,
-        @NotNull Duration sessionTtl,
+        @NotBlank String payloadKey,
         @NotNull Duration inquiryTtl,
         @NotNull Duration replayWindow,
         @NotNull Duration nonceRetention,
@@ -36,7 +35,6 @@ public record AppProperties(
 
     @Override
     public String toString() {
-        return "AppProperties[masterKey=****, sessionTtl=%s, inquiryTtl=%s]"
-                .formatted(sessionTtl, inquiryTtl);
+        return "AppProperties[payloadKey=****, inquiryTtl=%s]".formatted(inquiryTtl);
     }
 }

@@ -99,7 +99,7 @@ class ErrorEnvelopeIT {
                 mvc.perform(withClientHeaders(get("/v1/test/errors/header"))),
                 400,
                 "VALIDATION_ERROR",
-                "X-Session-Id");
+                "X-Probe-Header");
     }
 
     @Test

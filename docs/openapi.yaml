@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Momkn Pay API
-  version: 1.0.0
+  version: 2.0.0
   summary: Simulated bill-payment API for the Momkn Pay internship capstone.
   description: |
     Contract shared by the backend, iOS and Android tracks. Frozen after publication:
@@ -15,7 +15,8 @@ info:
     - Timestamps are ISO 8601 UTC with second precision (`2026-09-20T10:00:00Z`).
     - Every non-2xx response uses the `ErrorResponse` envelope. Clients switch on `error.code`.
     - Sensitive fields (subscriber number, PIN) travel AES-256-GCM encrypted in `payload`:
-      `base64(iv[12] ‖ ciphertext ‖ tag[16])`, key = the `sessionKey` from `POST /sessions`,
+      `base64(iv[12] ‖ ciphertext ‖ tag[16])`, key = the **static shared AES-256 key** that the
+      backend track distributes to both client tracks (there are no sessions — ADR-011),
       no AAD, plaintext JSON always carries `nonce` (32 hex chars) and `ts` (unix seconds).
       The server rejects `ts` more than 120 s from server time and any reused `nonce`.
 
@@ -23,14 +24,13 @@ info:
     | Version | Date | Change |
     |---|---|---|
     | 1.0.0 | 2026-10-06 | Initial contract (no-auth variant of the capstone brief). |
+    | 2.0.0 | 2026-10-01 | **Breaking.** Sessions removed: `POST /sessions`, `DELETE /sessions/{sessionId}` and the `X-Session-Id` header are gone; payloads are encrypted with one static shared key. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` removed; inquiry no longer returns 410. (ADR-011) |
 # Deliberately public: no security schemes (ADR-001).
 security: []
 servers:
   - url: https://api.momknpay.local/v1
     description: Local (Docker Compose, self-signed certificate — pin the published SPKI hash)
 tags:
-  - name: Sessions
-    description: Crypto sessions that issue the AES-256 payload key.
   - name: Profile
     description: The current user's profile.
   - name: Catalogue
@@ -41,58 +41,6 @@ tags:
     description: Payment history and receipts.
 
 paths:
-  /sessions:
-    post:
-      tags: [Sessions]
-      operationId: createSession
-      summary: Create a crypto session and receive the AES-256 payload key
-      description: |
-        Returns a fresh 32-byte key (base64) valid for 30 minutes. The key is returned **only here**;
-        keep it in memory, never on disk. Rate-limited to 5 per minute per user.
-      parameters:
-        - $ref: '#/components/parameters/RequestId'
-        - $ref: '#/components/parameters/ClientPlatform'
-        - $ref: '#/components/parameters/ClientVersion'
-        - $ref: '#/components/parameters/UserId'
-      responses:
-        '201':
-          description: Session created.
-          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/CreateSessionResponse' }
-              example:
-                sessionId: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60
-                sessionKey: q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=
-                expiresAt: '2026-09-20T10:30:00Z'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '429': { $ref: '#/components/responses/RateLimited' }
-        '500': { $ref: '#/components/responses/InternalError' }
-
-  /sessions/{sessionId}:
-    delete:
-      tags: [Sessions]
-      operationId: revokeSession
-      summary: Revoke a session (the key stops working immediately)
-      description: Idempotent — revoking an already revoked session also returns 204.
-      parameters:
-        - $ref: '#/components/parameters/RequestId'
-        - $ref: '#/components/parameters/ClientPlatform'
-        - $ref: '#/components/parameters/ClientVersion'
-        - $ref: '#/components/parameters/UserId'
-        - name: sessionId
-          in: path
-          required: true
-          schema: { type: string, maxLength: 40 }
-      responses:
-        '204':
-          description: Revoked.
-          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '500': { $ref: '#/components/responses/InternalError' }
-
   /profile:
     get:
       tags: [Profile]
@@ -262,7 +210,6 @@ paths:
         - $ref: '#/components/parameters/ClientPlatform'
         - $ref: '#/components/parameters/ClientVersion'
         - $ref: '#/components/parameters/UserId'
-        - $ref: '#/components/parameters/SessionId'
       requestBody:
         required: true
         content:
@@ -289,7 +236,6 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '410': { $ref: '#/components/responses/Gone' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
@@ -312,7 +258,6 @@ paths:
         - $ref: '#/components/parameters/ClientPlatform'
         - $ref: '#/components/parameters/ClientVersion'
         - $ref: '#/components/parameters/UserId'
-        - $ref: '#/components/parameters/SessionId'
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
@@ -473,13 +418,6 @@ components:
       description: The user this request acts for. Trusted as-is (no authentication).
       schema: { type: string, maxLength: 32 }
       example: usr_01
-    SessionId:
-      name: X-Session-Id
-      in: header
-      required: true
-      description: Session whose key encrypted `payload`. Must belong to `X-User-Id`.
-      schema: { type: string, maxLength: 40 }
-      example: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -510,18 +448,6 @@ components:
       format: date-time
       description: ISO 8601 UTC, second precision.
       example: '2026-09-20T10:00:00Z'
-
-    CreateSessionResponse:
-      type: object
-      required: [sessionId, sessionKey, expiresAt]
-      properties:
-        sessionId: { type: string, example: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60 }
-        sessionKey:
-          type: string
-          format: byte
-          description: base64 of 32 random bytes (AES-256 key). Memory only on the client.
-          example: q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=
-        expiresAt: { $ref: '#/components/schemas/Timestamp' }
 
     Profile:
       type: object
@@ -732,7 +658,6 @@ components:
         - DECRYPTION_FAILED
         - INSUFFICIENT_BALANCE
         - USER_NOT_FOUND
-        - SESSION_NOT_FOUND
         - SERVICE_NOT_FOUND
         - SUBSCRIBER_NOT_FOUND
         - INQUIRY_NOT_FOUND
@@ -743,7 +668,6 @@ components:
         - EMAIL_ALREADY_USED
         - IDEMPOTENCY_CONFLICT
         - INQUIRY_ALREADY_CONFIRMED
-        - SESSION_EXPIRED
         - INQUIRY_EXPIRED
         - INQUIRY_INVALIDATED
         - AMOUNT_OUT_OF_RANGE
@@ -757,7 +681,6 @@ components:
         | DECRYPTION_FAILED | 400 | Bad blob, wrong key, tampered, stale `ts` or replayed `nonce` |
         | INSUFFICIENT_BALANCE | 402 | Simulated decline (last digit 7) |
         | USER_NOT_FOUND | 404 | Unknown `X-User-Id` |
-        | SESSION_NOT_FOUND | 404 | Unknown, revoked or foreign session |
         | SERVICE_NOT_FOUND | 404 | Unknown `serviceId` |
         | SUBSCRIBER_NOT_FOUND | 404 | No bill for that number (last digit 0) |
         | INQUIRY_NOT_FOUND | 404 | Unknown or foreign inquiry |
@@ -768,7 +691,6 @@ components:
         | EMAIL_ALREADY_USED | 409 | Profile email conflict |
         | IDEMPOTENCY_CONFLICT | 409 | Key reused for a different inquiry |
         | INQUIRY_ALREADY_CONFIRMED | 409 | Inquiry already has a successful or pending transaction |
-        | SESSION_EXPIRED | 410 | Session past `expiresAt` — create a new one |
         | INQUIRY_EXPIRED | 410 | Inquiry past `expiresAt` |
         | INQUIRY_INVALIDATED | 410 | Three wrong PINs on this inquiry |
         | AMOUNT_OUT_OF_RANGE | 422 | `amountDue` outside the service's range (last digit 6) |

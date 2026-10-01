@@ -52,6 +52,7 @@ gantt
 - [ ] [M2 — Catalogue and profile](#m2--catalogue-and-profile-days-610) (6 slices)
 - [ ] [M3 — Payment flow](#m3--payment-flow-days-1115) (9 slices)
 - [ ] [M4 — Hardening and release](#m4--hardening-and-release-days-1620) (8 slices)
+- [ ] [M5 — Remove sessions](#m5--remove-sessions-after-v10) (4 slices, added after v1.0)
 
 ### Critical path
 
@@ -309,6 +310,41 @@ flowchart LR
 - [ ] **M4-S8 · Reflection and demo prep**
   - [ ] One-page reflection per intern. Rehearse the security questions: why AES-GCM on top of TLS, why a fresh IV, why the idempotency check comes before decryption, why no auth is not secure. *(docs/DEMO_GUIDE.md prepares the security questions and gives a reflection template)*
   - [ ] **Done when:** the reflections are submitted and the demo has been rehearsed once end to end. *(manual)*
+
+---
+
+## M5 — Remove sessions (after v1.0)
+
+- [ ] **M5 complete** (all slices done; both client tracks have moved to contract v2.0.0)
+
+**Goal:** the application has no sessions at all (ADR-011). Payloads stay AES-256-GCM-encrypted, with one static shared key.
+**Exit demo:** a payment from both apps with no session call, using the shared key; `POST /v1/sessions` returns 404.
+
+- [x] **M5-S1 · Remove sessions from the API and the code**
+  - [x] Contract v2.0.0: drop `POST`/`DELETE /sessions`, `X-Session-Id`, `SESSION_NOT_FOUND`, `SESSION_EXPIRED`; changelog row.
+  - [x] `V5__drop_sessions.sql`; remove the session entity, service, controller, cleanup job, key wrapping and master key.
+  - [x] `PayloadKey` (static key from `APP_PAYLOAD_KEY`, fail-fast), `PayloadDecryptor` and `ReplayGuard` without sessions; package `session` → `payload`.
+  - [x] Rate limit only on `/payments/confirm`.
+  - [x] **Done when:** `./mvnw verify` is green, `OpenApiContractIT` matches v2.0.0, and an existing database upgrades in place. *(87 unit + 99 IT)*
+  - Refs: ADR-011, SRS FR-ENC, LLD §4.1.1 and §8
+
+- [x] **M5-S2 · Postman, scripts and certificate verification**
+  - [x] Collection without session requests, key from the `payloadKey` variable, folders renumbered 01–05.
+  - [x] Every request verifies the server certificate; default `baseUrl` is `https://localhost/v1`.
+  - [x] `perf-smoke.js` without sessions.
+  - [x] **Done when:** Newman passes with `--ssl-extra-ca-certs certs/cert.pem` and fails without it. *(34/34; refused without the certificate)*
+  - Refs: NFR-DOC-3, NFR-SEC-8
+
+- [x] **M5-S3 · Documents and version 2.0.0**
+  - [x] ADR-011 (supersedes ADR-003, amends ADR-006); SRS, HLD, LLD, coding standards, demo guide, README, CLAUDE.md.
+  - [x] Version 2.0.0 and CHANGELOG with the client migration note.
+  - [x] **Done when:** no living document describes sessions as current behaviour.
+  - Refs: NFR-DOC-2, NFR-DOC-4
+
+- [ ] **M5-S4 · Roll out to the client tracks** *(manual)*
+  - [ ] Tell both client tracks about contract v2.0.0 and get their sign-off.
+  - [ ] Give them the shared payload key privately (not through git).
+  - [ ] **Done when:** both apps pay without a session call.
 
 ---
 

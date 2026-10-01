@@ -14,13 +14,12 @@ class IdGeneratorTest {
 
     @Test
     void idsHaveThePrefixAndLengthOfTheContract() {
-        assertThat(ids.sessionId()).matches("^ses_[0-9a-f]{32}$");
         assertThat(ids.inquiryId()).matches("^inq_[0-9a-f]{16}$");
     }
 
     @Test
     void idsAreNotRepeated() {
-        assertThat(ids.sessionId()).isNotEqualTo(ids.sessionId());
+        assertThat(ids.inquiryId()).isNotEqualTo(ids.inquiryId());
     }
 
     @Test

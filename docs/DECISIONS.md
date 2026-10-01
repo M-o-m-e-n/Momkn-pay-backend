@@ -14,10 +14,11 @@ The first decision (ADR-001) is the root. Every other decision here follows from
 ```mermaid
 flowchart TD
     A[ADR-001<br/>No auth module] --> B[ADR-002<br/>User identified by X-User-Id]
-    A --> C[ADR-003<br/>Encryption key from POST /sessions]
+    A --> C[ADR-003<br/>Encryption key from POST /sessions<br/>superseded]
+    C --> K[ADR-011<br/>No sessions, static shared key]
     A --> D[ADR-004<br/>Users only from seed data]
     A --> E[ADR-005<br/>Passwords removed, PIN kept]
-    A --> F[ADR-006<br/>Rate limit moves to /sessions]
+    A --> F[ADR-006<br/>Rate limit on confirm<br/>amended by ADR-011]
     A --> G[ADR-007<br/>More specific error codes]
     C --> H[ADR-008<br/>Idempotency check before decryption]
     I[ADR-009<br/>Spring Boot + Java 25]
@@ -29,14 +30,15 @@ flowchart TD
 |---|---|---|
 | [001](#adr-001--build-the-backend-without-an-authentication-module) | Build the backend without an authentication module | Accepted |
 | [002](#adr-002--identify-the-user-with-the-x-user-id-header) | Identify the user with the `X-User-Id` header | Accepted |
-| [003](#adr-003--issue-the-encryption-key-from-post-sessions) | Issue the encryption key from `POST /sessions` | Accepted |
+| [003](#adr-003--issue-the-encryption-key-from-post-sessions) | Issue the encryption key from `POST /sessions` | **Superseded by ADR-011** |
 | [004](#adr-004--users-come-only-from-seed-data) | Users come only from seed data | Accepted |
 | [005](#adr-005--remove-passwords-keep-the-pin) | Remove passwords, keep the PIN | Accepted |
-| [006](#adr-006--move-the-login-rate-limit-to-post-sessions) | Move the login rate limit to `POST /sessions` | Accepted |
+| [006](#adr-006--move-the-login-rate-limit-to-post-sessions) | Move the login rate limit to `POST /sessions` | Amended by ADR-011 |
 | [007](#adr-007--add-specific-error-codes-for-the-new-failure-paths) | Add specific error codes for the new failure paths | Accepted |
 | [008](#adr-008--check-idempotency-before-decrypting) | Check idempotency before decrypting | Accepted |
 | [009](#adr-009--spring-boot-and-java-25) | Spring Boot and Java 25 | Accepted |
 | [010](#adr-010--confirm-gets-a-500-ms-latency-budget-bcrypt-stays-at-cost-12) | Confirm gets a 500 ms latency budget; bcrypt stays at cost 12 | Accepted |
+| [011](#adr-011--remove-sessions-encrypt-payloads-with-one-static-shared-key) | Remove sessions; encrypt payloads with one static shared key | Accepted |
 
 ---
 
@@ -103,7 +105,9 @@ User-scoped endpoints require an `X-User-Id` header (for example `usr_01`), and 
 
 ## ADR-003 — Issue the encryption key from `POST /sessions`
 
-**Status:** Accepted · **Affects:** FR-SES-1…6, HLD §8.1, §10, LLD §8
+**Status:** Superseded by [ADR-011](#adr-011--remove-sessions-encrypt-payloads-with-one-static-shared-key) on 2026-10-01 · **Affected:** the former FR-SES-1…6
+
+> Kept for history. `POST /sessions`, `X-Session-Id` and the wrapped per-session keys described below no longer exist.
 
 ### Context
 In the brief, the AES-256 `sessionKey` is returned by **login** and used to encrypt the two sensitive fields: the subscriber number on inquiry and the PIN on confirm. With login removed, nothing hands out that key.
@@ -179,7 +183,9 @@ No password column, and no `/profile/change-password` endpoint. The PIN stays, s
 
 ## ADR-006 — Move the login rate limit to `POST /sessions`
 
-**Status:** Accepted · **Affects:** FR-SES-6, FR-PAY-11, LLD §7.6
+**Status:** Amended by ADR-011 on 2026-10-01 · **Affects:** FR-PAY-11, LLD §7.6
+
+> `POST /sessions` was removed by ADR-011, so only `POST /payments/confirm` is rate-limited now. The reasoning about the confirm limit below still holds.
 
 ### Context
 The brief rate-limits `/auth/login` and `/payments/confirm` to 5 attempts per minute per user. Login no longer exists.
@@ -222,13 +228,13 @@ Remove the three auth-only codes. Add one code per new failure path, among them 
 **Status:** Accepted · **Affects:** FR-PAY-2, HLD §8.4, LLD §9.4
 
 ### Context
-Each encrypted payload carries a single-use nonce, and the server rejects a nonce it has seen before (ADR-003). A client that times out on confirm retries with the **same bytes**, so the same nonce and the same `Idempotency-Key`.
+Each encrypted payload carries a single-use nonce, and the server rejects a nonce it has seen before (originally ADR-003, kept by ADR-011). A client that times out on confirm retries with the **same bytes**, so the same nonce and the same `Idempotency-Key`.
 
 ### Decision
 On `POST /payments/confirm`, the server first looks up the transaction by (`X-User-Id`, `Idempotency-Key`). If one exists, it returns it and never decrypts the payload.
 
 ### Cause
-If the server decrypted first, the replay check would reject the genuine retry as an attack, and the user would never get their receipt, even though the payment went through. This conflict only exists because of the session-key encryption kept in ADR-003.
+If the server decrypted first, the replay check would reject the genuine retry as an attack, and the user would never get their receipt, even though the payment went through. This conflict exists because payloads are encrypted and replay-protected (ADR-003, then ADR-011).
 
 ### Consequences
 - ✅ A retry gets the original transaction, and a replayed payload still cannot create a second payment.
@@ -285,6 +291,47 @@ Keep bcrypt at cost 12. Give `POST /payments/confirm` its own p95 budget of **50
 
 ---
 
+## ADR-011 — Remove sessions; encrypt payloads with one static shared key
+
+**Status:** Accepted · **Date:** 2026-10-01 · **Supersedes:** ADR-003 · **Amends:** ADR-006 · **Affects:** contract v2.0.0, SRS §3.2 (FR-ENC), HLD §8.1 and §10, LLD §4.1.1 and §8
+
+### Context
+ADR-003 kept the brief's per-login `sessionKey` by adding `POST /sessions`: a client asked for a 30-minute AES key, sent its id in `X-Session-Id`, and the server stored the key wrapped with a master key. It worked, but it was machinery around something that protects nothing here: anyone could ask for a session for any user, because there is no authentication (ADR-001).
+
+### Decision
+The application has **no sessions at all**.
+
+- `POST /v1/sessions`, `DELETE /v1/sessions/{sessionId}` and the `X-Session-Id` header are removed (contract **v2.0.0**, a breaking change).
+- The subscriber number and the PIN are still sent AES-256-GCM-encrypted, with **one static key** shared by every client. The server reads it from `APP_PAYLOAD_KEY`; the backend track generates it once and gives the same value to both client tracks, who build it into the apps.
+- The replay protection stays: each payload's `nonce` is accepted once and its `ts` must be within 120 seconds.
+- The PIN check and the `X-User-Id` header are unchanged.
+- Removed with it: the `sessions` table and the `session_id` columns (migration V5), the master key and key wrapping, the session cleanup job, the error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED`, and the rate limit on `/sessions`.
+
+### Cause
+The whole application is a mock: there is no authentication module, anyone can pay anything, and no real money moves. A session concept implies a protected relationship between a client and the server that this project deliberately does not have, so it should not exist in the API either.
+
+What follows from that:
+- With no login, a per-session key was handed to any caller on request. It added an endpoint, a table, a header, key wrapping and two error states, and all of that protected only against the same things a single shared key protects against (an intermediary that terminates TLS, or a log that records bodies).
+- The clients get simpler: no session to create before paying, no session expiry to handle, no key to keep alive in memory across screens.
+- The brief's AES-GCM learning goal is kept: the apps still encrypt with a fresh IV per message, and the server still decrypts and rejects replays.
+
+### Alternatives considered
+| Option | Why not chosen |
+|---|---|
+| Keep `POST /sessions` (ADR-003) | Machinery without a security benefit in an API where anyone can request a session for any user. |
+| Remove payload encryption entirely | Loses the brief's AES-256-GCM learning goal and the "encrypted payloads round-trip; a replayed nonce is rejected" definition-of-done item. |
+| Derive a key per request or per user | Still needs a shared secret to derive from, so it is the static key with extra steps. |
+
+### Consequences
+- ✅ A smaller API (8 endpoints instead of 10), one table and about 15 classes fewer, and simpler clients.
+- ✅ AES-GCM and replay protection still demonstrated end to end.
+- ❌ **Breaking contract change**: both client tracks must drop the session calls and the `X-Session-Id` header and embed the shared key. The contract moves to v2.0.0.
+- ❌ One key for everyone, built into the apps: anyone who extracts it from an app build can read and forge payloads. It cannot be rotated without shipping new app builds. Documented as limitation L-2 in the SRS.
+- ❌ The brief's "session key issued per login, held in memory only, dies with logout" behaviour is no longer exercised by the clients.
+- The key must be distributed to the client tracks the same way as the SPKI pins: once, out of band, never through git.
+
+---
+
 ## Revisiting these decisions
 
 Revisit ADR-001 if any of the following becomes true:
@@ -292,4 +339,4 @@ Revisit ADR-001 if any of the following becomes true:
 - the backend track finishes the definition of done early (see MILESTONES stretch goal X-2: add JWT behind `CurrentUserArgumentResolver`);
 - a mentor or reviewer requires the brief's F1/F2 features for grading.
 
-When auth is added, ADR-002 and ADR-006 are superseded, ADR-003 can move the key back into the login response, and ADR-004 and ADR-005 should be reopened.
+When auth is added, ADR-002 and ADR-006 are superseded, ADR-011 should be reopened (the key can come from the login response again, as the brief describes), and ADR-004 and ADR-005 should be reopened.

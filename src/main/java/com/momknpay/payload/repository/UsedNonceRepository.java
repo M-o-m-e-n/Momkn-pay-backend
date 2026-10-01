@@ -1,6 +1,6 @@
-package com.momknpay.session.repository;
+package com.momknpay.payload.repository;
 
-import com.momknpay.session.domain.UsedNonce;
+import com.momknpay.payload.domain.UsedNonce;
 import java.time.Instant;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
