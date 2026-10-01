@@ -43,7 +43,9 @@ public class RateLimiter {
         Bucket bucket = buckets.get(policy + ":" + userId, key -> newBucket());
         ConsumptionProbe probe = bucket.tryConsumeAndReturnRemaining(1);
         if (!probe.isConsumed()) {
-            long seconds = TimeUnit.NANOSECONDS.toSeconds(probe.getNanosToWaitForRefill()) + 1;
+            // round up to whole seconds: exactly 60 s left is 60, not 61
+            long seconds =
+                    Math.ceilDiv(probe.getNanosToWaitForRefill(), TimeUnit.SECONDS.toNanos(1));
             throw new RateLimitedException(seconds);
         }
     }
