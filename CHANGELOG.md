@@ -2,6 +2,28 @@
 
 All notable changes to the Momkn Pay backend. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/). API contract changes are also recorded in the changelog inside [`docs/openapi.yaml`](docs/openapi.yaml).
 
+## [2.0.0] — 2026-10-01
+
+**Breaking:** sessions are removed (ADR-011). Contract v2.0.0.
+
+### Removed
+- `POST /v1/sessions`, `DELETE /v1/sessions/{sessionId}` and the `X-Session-Id` header.
+- Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED`; inquiry no longer returns 410.
+- The `sessions` table and the `session_id` columns (migration `V5__drop_sessions.sql`), the master key and session-key wrapping, the session cleanup job, and the rate limit on `/sessions`.
+- Configuration `APP_MASTER_KEY` and `APP_SESSION_TTL`.
+
+### Changed
+- Payloads (subscriber number, PIN) are still AES-256-GCM-encrypted, now with **one static key** from `APP_PAYLOAD_KEY` that is also built into the apps. Startup fails without a valid 32-byte key.
+- The replay guard no longer references a session; nonces stay single-use and `ts` must be within 120 s.
+- The `session` package is now `payload`.
+- The Postman collection has no session requests, takes the key from the `payloadKey` variable, defaults to `https://localhost/v1` and verifies the server certificate (trust `certs/cert.pem`).
+
+### Fixed
+- `Retry-After` was one second too long when exactly a whole number of seconds remained (61 instead of 60).
+
+### Migration for clients
+Remove the session calls and the `X-Session-Id` header, and encrypt payloads with the shared key from the backend track instead of a per-session key. Nothing else in the payment flow changes: same payload format, PIN, `X-User-Id` and `Idempotency-Key`.
+
 ## [1.0.0] — 2026-09-30
 
 First complete release: all ten endpoints of the frozen contract v1.0.0, delivered in milestones M0–M4 ([docs/MILESTONES.md](docs/MILESTONES.md)).
