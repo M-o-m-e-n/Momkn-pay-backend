@@ -13,9 +13,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Size;
 import java.util.UUID;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -23,7 +21,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@Validated
 @Tag(name = "Payments", description = "Fees inquiry and idempotent payment confirmation")
 @RequestMapping("/payments")
 class PaymentController {
@@ -50,18 +47,13 @@ class PaymentController {
             description = "VALIDATION_ERROR (incl. subscriberNumber) or DECRYPTION_FAILED")
     @ApiResponse(
             responseCode = "404",
-            description =
-                    "SUBSCRIBER_NOT_FOUND, SERVICE_NOT_FOUND, SESSION_NOT_FOUND or USER_NOT_FOUND")
+            description = "SUBSCRIBER_NOT_FOUND, SERVICE_NOT_FOUND or USER_NOT_FOUND")
     @ApiResponse(responseCode = "409", description = "BILL_ALREADY_PAID")
-    @ApiResponse(responseCode = "410", description = "SESSION_EXPIRED")
     @ApiResponse(responseCode = "500", description = "INTERNAL_ERROR")
     @ApiResponse(responseCode = "503", description = "SERVICE_UNAVAILABLE — inactive service")
     @PostMapping("/inquiry")
-    InquiryResponse inquiry(
-            @CurrentUser UserRef user,
-            @RequestHeader(Headers.SESSION_ID) @Size(max = 40) String sessionId,
-            @Valid @RequestBody InquiryRequest request) {
-        return inquiryService.inquire(user.id(), sessionId, request);
+    InquiryResponse inquiry(@CurrentUser UserRef user, @Valid @RequestBody InquiryRequest request) {
+        return inquiryService.inquire(user.id(), request);
     }
 
     @Operation(
@@ -77,15 +69,11 @@ class PaymentController {
             responseCode = "400",
             description = "VALIDATION_ERROR (incl. pin, Idempotency-Key) or DECRYPTION_FAILED")
     @ApiResponse(responseCode = "402", description = "INSUFFICIENT_BALANCE — simulated decline")
-    @ApiResponse(
-            responseCode = "404",
-            description = "INQUIRY_NOT_FOUND, SESSION_NOT_FOUND or USER_NOT_FOUND")
+    @ApiResponse(responseCode = "404", description = "INQUIRY_NOT_FOUND or USER_NOT_FOUND")
     @ApiResponse(
             responseCode = "409",
             description = "IDEMPOTENCY_CONFLICT or INQUIRY_ALREADY_CONFIRMED")
-    @ApiResponse(
-            responseCode = "410",
-            description = "INQUIRY_EXPIRED, INQUIRY_INVALIDATED or SESSION_EXPIRED")
+    @ApiResponse(responseCode = "410", description = "INQUIRY_EXPIRED or INQUIRY_INVALIDATED")
     @ApiResponse(responseCode = "422", description = "AMOUNT_OUT_OF_RANGE")
     @ApiResponse(responseCode = "429", description = "RATE_LIMITED — see Retry-After")
     @ApiResponse(responseCode = "500", description = "INTERNAL_ERROR")
@@ -93,9 +81,8 @@ class PaymentController {
     @PostMapping("/confirm")
     ConfirmResponse confirm(
             @CurrentUser UserRef user,
-            @RequestHeader(Headers.SESSION_ID) @Size(max = 40) String sessionId,
             @RequestHeader(Headers.IDEMPOTENCY_KEY) UUID idempotencyKey,
             @Valid @RequestBody ConfirmRequest request) {
-        return confirmService.confirm(user.id(), sessionId, idempotencyKey, request);
+        return confirmService.confirm(user.id(), idempotencyKey, request);
     }
 }

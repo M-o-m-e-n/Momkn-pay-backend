@@ -8,6 +8,7 @@ import com.momknpay.common.error.ErrorCode;
 import com.momknpay.common.util.IdGenerator;
 import com.momknpay.common.util.Masking;
 import com.momknpay.common.util.TimeProvider;
+import com.momknpay.payload.service.PayloadDecryptor;
 import com.momknpay.payment.domain.Inquiry;
 import com.momknpay.payment.engine.Fees;
 import com.momknpay.payment.engine.InquiryDecision;
@@ -16,7 +17,6 @@ import com.momknpay.payment.repository.InquiryRepository;
 import com.momknpay.payment.web.dto.InquiryPayload;
 import com.momknpay.payment.web.dto.InquiryRequest;
 import com.momknpay.payment.web.dto.InquiryResponse;
-import com.momknpay.session.service.PayloadDecryptor;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,9 +26,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Fees inquiry (FR-INQ, LLD §9.3). Check order: service exists → service active → decrypt (session,
- * blob, replay) → subscriber matches the service's inputPattern → mock rule → persist a 5-minute
- * quote.
+ * Fees inquiry (FR-INQ, LLD §9.3). Check order: service exists → service active → decrypt (blob,
+ * replay) → subscriber matches the service's inputPattern → mock rule → persist a 5-minute quote.
  *
  * <p>Deliberately not {@code @Transactional}: the single insert commits on its own, so the {@code
  * _slow} delay afterwards holds no connection or lock.
@@ -67,7 +66,7 @@ public class InquiryService {
         this.properties = properties;
     }
 
-    public InquiryResponse inquire(String userId, String sessionId, InquiryRequest request) {
+    public InquiryResponse inquire(String userId, InquiryRequest request) {
         BillerService service =
                 services.findByIdAndDeletedAtIsNull(request.serviceId())
                         .orElseThrow(() -> new ApiException(ErrorCode.SERVICE_NOT_FOUND));
@@ -75,8 +74,7 @@ public class InquiryService {
             if (!service.isActive()) {
                 throw new ApiException(ErrorCode.SERVICE_UNAVAILABLE);
             }
-            InquiryPayload payload =
-                    decryptor.decrypt(sessionId, userId, request.payload(), InquiryPayload.class);
+            InquiryPayload payload = decryptor.decrypt(request.payload(), InquiryPayload.class);
             String subscriber = payload.subscriberNumber();
             if (subscriber == null || !matches(service.getInputPattern(), subscriber)) {
                 throw new ApiException(ErrorCode.VALIDATION_ERROR, "subscriberNumber");
@@ -91,7 +89,6 @@ public class InquiryService {
                                     ids.inquiryId(),
                                     userId,
                                     service,
-                                    sessionId,
                                     subscriber,
                                     decision.customerName(),
                                     decision.billMonth(),

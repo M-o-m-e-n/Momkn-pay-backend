@@ -42,8 +42,8 @@ class ErrorProbeController {
     }
 
     @GetMapping("/header")
-    String header(@RequestHeader("X-Session-Id") String sessionId) {
-        return sessionId;
+    String header(@RequestHeader("X-Probe-Header") String value) {
+        return value;
     }
 
     @GetMapping("/param")

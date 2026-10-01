@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.TestcontainersConfiguration;
-import com.momknpay.session.service.SessionService;
 import com.momknpay.support.Payloads;
 import com.momknpay.support.PaymentClient;
 import java.util.ArrayList;
@@ -36,15 +35,14 @@ import org.springframework.test.web.servlet.ResultActions;
 class ConcurrencyIT {
 
     @Autowired private MockMvc mvc;
-    @Autowired private SessionService sessionService;
     @Autowired private JdbcTemplate jdbc;
 
     @Test
     void tenParallelRetriesOfOneRequestCreateOneTransaction() throws Exception {
-        PaymentClient mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
+        PaymentClient mina = new PaymentClient(mvc, "usr_01");
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750891");
         UUID key = UUID.randomUUID();
-        String payload = Payloads.confirm(mina.sessionKey(), "1234"); // identical bytes
+        String payload = Payloads.confirm("1234"); // identical bytes
 
         List<MockHttpServletResponse> responses =
                 runTogether(10, () -> mina.confirmWithPayload(inquiryId, key, payload));
@@ -60,7 +58,7 @@ class ConcurrencyIT {
 
     @Test
     void twoDifferentKeysOnOneInquiryPayOnce() throws Exception {
-        PaymentClient mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
+        PaymentClient mina = new PaymentClient(mvc, "usr_01");
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750892");
 
         List<MockHttpServletResponse> responses =

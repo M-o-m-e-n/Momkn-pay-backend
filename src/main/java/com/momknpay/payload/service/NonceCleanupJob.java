@@ -1,8 +1,8 @@
-package com.momknpay.session.service;
+package com.momknpay.payload.service;
 
 import com.momknpay.common.config.AppProperties;
 import com.momknpay.common.util.TimeProvider;
-import com.momknpay.session.repository.UsedNonceRepository;
+import com.momknpay.payload.repository.UsedNonceRepository;
 import java.time.Duration;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;

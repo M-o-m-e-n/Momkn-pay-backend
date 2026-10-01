@@ -2,12 +2,12 @@ package com.momknpay;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.momknpay.common.config.AppProperties;
 import com.momknpay.payment.web.dto.ConfirmPayload;
 import com.momknpay.payment.web.dto.ConfirmRequest;
 import com.momknpay.payment.web.dto.InquiryPayload;
 import com.momknpay.payment.web.dto.InquiryRequest;
-import com.momknpay.session.web.dto.CreateSessionResponse;
-import java.time.Instant;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -16,14 +16,18 @@ import org.junit.jupiter.api.Test;
  */
 class SensitiveToStringTest {
 
-    private static final String KEY = "q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=";
     private static final String BLOB = "AAECAwQFBgcICQoLjXq9mWQ2Zx0fYk1c3gUqvLw7r0E=";
 
     @Test
-    void sessionKeyIsMasked() {
-        String text = new CreateSessionResponse("ses_1", KEY, Instant.EPOCH).toString();
+    void payloadKeyIsMaskedInTheProperties() {
+        Duration any = Duration.ofMinutes(1);
+        String key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
 
-        assertThat(text).contains("ses_1").doesNotContain(KEY);
+        String text =
+                new AppProperties(key, any, any, any, any, any, new AppProperties.RateLimit(5))
+                        .toString();
+
+        assertThat(text).doesNotContain(key).contains("****");
     }
 
     @Test

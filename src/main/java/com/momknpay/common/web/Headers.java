@@ -7,7 +7,6 @@ public final class Headers {
     public static final String CLIENT_PLATFORM = "X-Client-Platform";
     public static final String CLIENT_VERSION = "X-Client-Version";
     public static final String USER_ID = "X-User-Id";
-    public static final String SESSION_ID = "X-Session-Id";
     public static final String IDEMPOTENCY_KEY = "Idempotency-Key";
     public static final String RETRY_AFTER = "Retry-After";
 

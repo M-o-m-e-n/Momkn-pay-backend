@@ -19,7 +19,6 @@ public class RateLimiter {
 
     /** Which endpoint a bucket belongs to; each user gets one bucket per policy. */
     public enum Policy {
-        SESSIONS,
         CONFIRM
     }
 

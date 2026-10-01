@@ -15,6 +15,7 @@ import com.momknpay.common.config.AppProperties;
 import com.momknpay.common.error.ApiException;
 import com.momknpay.common.error.ErrorCode;
 import com.momknpay.common.util.TimeProvider;
+import com.momknpay.payload.service.PayloadDecryptor;
 import com.momknpay.payment.domain.Inquiry;
 import com.momknpay.payment.domain.InquiryStatus;
 import com.momknpay.payment.domain.MockRule;
@@ -22,7 +23,6 @@ import com.momknpay.payment.repository.InquiryRepository;
 import com.momknpay.payment.web.dto.ConfirmPayload;
 import com.momknpay.payment.web.dto.ConfirmRequest;
 import com.momknpay.payment.web.dto.ConfirmResponse;
-import com.momknpay.session.service.PayloadDecryptor;
 import com.momknpay.transaction.domain.Transaction;
 import com.momknpay.transaction.domain.TransactionStatus;
 import com.momknpay.transaction.repository.TransactionRepository;
@@ -45,7 +45,6 @@ class ConfirmServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-09-20T10:00:00Z");
     private static final String USER = "usr_01";
-    private static final String SESSION = "ses_1";
     private static final String GOOD_PIN = "1234";
 
     private final InquiryRepository inquiries = mock(InquiryRepository.class);
@@ -70,7 +69,6 @@ class ConfirmServiceTest {
                     time,
                     new AppProperties(
                             "unused",
-                            Duration.ofMinutes(30),
                             Duration.ofMinutes(5),
                             Duration.ofSeconds(120),
                             Duration.ofMinutes(5),
@@ -122,7 +120,7 @@ class ConfirmServiceTest {
         Inquiry inquiry = inquiry(MockRule.NORMAL, 24_750, NOW.minusSeconds(1));
 
         assertFails(() -> confirm(inquiry, GOOD_PIN), ErrorCode.INQUIRY_EXPIRED, null);
-        verify(decryptor, never()).decrypt(anyString(), anyString(), anyString(), any());
+        verify(decryptor, never()).decrypt(anyString(), any());
         verify(transactions, never()).saveAndFlush(any());
     }
 
@@ -198,10 +196,10 @@ class ConfirmServiceTest {
                 .thenReturn(Optional.of(storedTransaction(inquiry.getId(), key)));
 
         ConfirmResponse response =
-                service.confirm(USER, SESSION, key, new ConfirmRequest(inquiry.getId(), "blob"));
+                service.confirm(USER, key, new ConfirmRequest(inquiry.getId(), "blob"));
 
         assertThat(response.transactionId()).isEqualTo("txn_5500");
-        verify(decryptor, never()).decrypt(anyString(), anyString(), anyString(), any());
+        verify(decryptor, never()).decrypt(anyString(), any());
         verify(inquiries, never()).findForUpdate(anyString(), anyString());
     }
 
@@ -212,7 +210,7 @@ class ConfirmServiceTest {
                 .thenReturn(Optional.of(storedTransaction("inq_first", key)));
 
         assertFails(
-                () -> service.confirm(USER, SESSION, key, new ConfirmRequest("inq_other", "blob")),
+                () -> service.confirm(USER, key, new ConfirmRequest("inq_other", "blob")),
                 ErrorCode.IDEMPOTENCY_CONFLICT,
                 null);
     }
@@ -227,7 +225,6 @@ class ConfirmServiceTest {
                         "inq_test",
                         USER,
                         cairo,
-                        SESSION,
                         "1024750891",
                         "Mina A.",
                         "2026-08",
@@ -242,10 +239,10 @@ class ConfirmServiceTest {
     }
 
     private ConfirmResponse confirm(Inquiry inquiry, String pin) {
-        when(decryptor.decrypt(eq(SESSION), eq(USER), eq("blob"), eq(ConfirmPayload.class)))
+        when(decryptor.decrypt(eq("blob"), eq(ConfirmPayload.class)))
                 .thenReturn(new ConfirmPayload(pin, "0".repeat(32), NOW.getEpochSecond()));
         return service.confirm(
-                USER, SESSION, UUID.randomUUID(), new ConfirmRequest(inquiry.getId(), "blob"));
+                USER, UUID.randomUUID(), new ConfirmRequest(inquiry.getId(), "blob"));
     }
 
     private Transaction storedTransaction(String inquiryId, UUID key) {

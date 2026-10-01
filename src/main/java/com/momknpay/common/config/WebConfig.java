@@ -38,8 +38,6 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         // order matters: a request with bad headers never consumes a rate-limit token
         registry.addInterceptor(requiredHeaders).addPathPatterns(API_PREFIX + "/**");
-        registry.addInterceptor(rateLimit)
-                .addPathPatterns(
-                        RateLimitInterceptor.SESSIONS_PATH, RateLimitInterceptor.CONFIRM_PATH);
+        registry.addInterceptor(rateLimit).addPathPatterns(RateLimitInterceptor.CONFIRM_PATH);
     }
 }

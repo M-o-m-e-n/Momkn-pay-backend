@@ -1,4 +1,4 @@
-package com.momknpay.session.domain;
+package com.momknpay.payload.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -24,17 +24,13 @@ public class UsedNonce implements Persistable<String> {
     @Column(length = 32)
     private String nonce;
 
-    @Column(name = "session_id", nullable = false, updatable = false)
-    private String sessionId;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     protected UsedNonce() {}
 
-    public UsedNonce(String nonce, String sessionId, Instant createdAt) {
+    public UsedNonce(String nonce, Instant createdAt) {
         this.nonce = nonce;
-        this.sessionId = sessionId;
         this.createdAt = createdAt;
     }
 
@@ -46,10 +42,6 @@ public class UsedNonce implements Persistable<String> {
     @Override
     public boolean isNew() {
         return true;
-    }
-
-    public String getSessionId() {
-        return sessionId;
     }
 
     public Instant getCreatedAt() {

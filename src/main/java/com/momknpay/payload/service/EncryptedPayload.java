@@ -1,4 +1,4 @@
-package com.momknpay.session.service;
+package com.momknpay.payload.service;
 
 /**
  * Plaintext of an encrypted request payload. Every payload carries a single-use {@code nonce} (32

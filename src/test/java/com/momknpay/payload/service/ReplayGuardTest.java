@@ -1,4 +1,4 @@
-package com.momknpay.session.service;
+package com.momknpay.payload.service;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -12,8 +12,8 @@ import com.momknpay.common.config.AppProperties;
 import com.momknpay.common.error.ApiException;
 import com.momknpay.common.error.ErrorCode;
 import com.momknpay.common.util.TimeProvider;
-import com.momknpay.session.domain.UsedNonce;
-import com.momknpay.session.repository.UsedNonceRepository;
+import com.momknpay.payload.domain.UsedNonce;
+import com.momknpay.payload.repository.UsedNonceRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -41,25 +41,25 @@ class ReplayGuardTest {
                 .thenReturn(null)
                 .thenThrow(new DataIntegrityViolationException("duplicate key"));
 
-        guard.check("ses_1", NONCE, NOW.getEpochSecond());
+        guard.check(NONCE, NOW.getEpochSecond());
 
-        assertDecryptionFailed(() -> guard.check("ses_1", NONCE, NOW.getEpochSecond()));
+        assertDecryptionFailed(() -> guard.check(NONCE, NOW.getEpochSecond()));
     }
 
     @Test
     void timestampsInsideTheWindowAreAccepted() {
         long now = NOW.getEpochSecond();
 
-        assertThatCode(() -> guard.check("ses_1", NONCE, now - 120)).doesNotThrowAnyException();
-        assertThatCode(() -> guard.check("ses_1", NONCE, now + 120)).doesNotThrowAnyException();
+        assertThatCode(() -> guard.check(NONCE, now - 120)).doesNotThrowAnyException();
+        assertThatCode(() -> guard.check(NONCE, now + 120)).doesNotThrowAnyException();
     }
 
     @Test
     void staleOrFutureTimestampIsRejectedBeforeTouchingTheDatabase() {
         long now = NOW.getEpochSecond();
 
-        assertDecryptionFailed(() -> guard.check("ses_1", NONCE, now - 121));
-        assertDecryptionFailed(() -> guard.check("ses_1", NONCE, now + 121));
+        assertDecryptionFailed(() -> guard.check(NONCE, now - 121));
+        assertDecryptionFailed(() -> guard.check(NONCE, now + 121));
         verify(nonces, never()).saveAndFlush(any());
     }
 
@@ -73,6 +73,6 @@ class ReplayGuardTest {
     static AppProperties properties(Duration replayWindow) {
         Duration any = Duration.ofMinutes(5);
         return new AppProperties(
-                "unused", any, any, replayWindow, any, any, any, new AppProperties.RateLimit(5));
+                "unused", any, replayWindow, any, any, any, new AppProperties.RateLimit(5));
     }
 }
