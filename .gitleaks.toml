@@ -8,10 +8,10 @@ useDefault = true
 [allowlist]
 description = "Test-only keys and documentation examples"
 regexes = [
-    # test master key: base64 of bytes 0x00..0x1f (src/test/resources/config/application.yml)
+    # test payload key: base64 of bytes 0x00..0x1f (src/test/resources/config/application.yml)
     '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=''',
     # deliberately invalid 16-byte key used by StartupValidationTest
     '''AAECAwQFBgcICQoLDA0ODw==''',
-    # example sessionKey in docs/LLD.md and docs/openapi.yaml
+    # example sessionKey that appeared in docs/LLD.md and docs/openapi.yaml up to v1.0 (still in history)
     '''q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=''',
 ]

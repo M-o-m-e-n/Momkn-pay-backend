@@ -4,7 +4,7 @@ Instructions for Claude when working in this repository. Follow them on **every*
 
 ## Project in one paragraph
 
-Momkn Pay is a **simulated** bill-payment backend (electricity, water, gas, internet, mobile, landline) for an internship capstone. There is one backend here, and two native clients (iOS and Android) in other repositories that consume a frozen API contract. **There is no authentication module and every endpoint is public.** The user is identified by the `X-User-Id` header, and the AES-256-GCM payload key comes from `POST /v1/sessions` (see `docs/DECISIONS.md`). Stack: **Java 25, Spring Boot, PostgreSQL, Spring Data JPA, Flyway, Maven, Docker Compose.** Package root: `com.momknpay`.
+Momkn Pay is a **simulated** bill-payment backend (electricity, water, gas, internet, mobile, landline) for an internship capstone. There is one backend here, and two native clients (iOS and Android) in other repositories that consume a frozen API contract. **There is no authentication module and no sessions; every endpoint is public.** The user is identified by the `X-User-Id` header, and payloads are AES-256-GCM-encrypted with one static shared key from `APP_PAYLOAD_KEY` (see `docs/DECISIONS.md`, ADR-001 and ADR-011). Stack: **Java 25, Spring Boot, PostgreSQL, Spring Data JPA, Flyway, Maven, Docker Compose.** Package root: `com.momknpay`.
 
 ## Sources of truth (read before acting; never contradict them)
 
@@ -71,10 +71,10 @@ If a prompt conflicts with these documents, **stop and say so**. Do not silently
 
 ## Hard rules (never break them, even if asked casually; push back and explain)
 
-1. **Never log, store or return** the PIN, the session key, `payload` (encrypted or decrypted) or the master key. Mask subscriber numbers in logs (`******0891`).
+1. **Never log, store or return** the PIN, the payload key or `payload` (encrypted or decrypted). Mask subscriber numbers in logs (`******0891`).
 2. **Never commit secrets**: `.env`, keystores, `*.pem`, `*.p12`, keys. Update `.env.example` instead.
 3. **Never change the API contract** (paths, fields, status or error codes) without the user confirming the contract-change process (issue, sign-off from both client tracks, version bump in the changelog).
-4. **Never add an auth module, JWT, passwords or login** unless the user explicitly reopens ADR-001.
+4. **Never add an auth module, JWT, passwords, login or sessions** unless the user explicitly reopens ADR-001 or ADR-011.
 5. **Never weaken idempotency**: the lookup happens before decryption, and the database unique constraint stays.
 6. **Never use floating point for money**, and never use a non-injected clock.
 7. Do not add dependencies, frameworks or abstractions that the LLD does not call for without asking first.
@@ -83,7 +83,7 @@ If a prompt conflicts with these documents, **stop and say so**. Do not silently
 
 - Only commit or push when the user asks.
 - Branch: `feature/<slice-id>-<short-name>` (for example `feature/M1-S3-error-envelope`), or `fix/<ticket>-<short-name>`.
-- Commits: Conventional Commits, `type(scope): summary`, scope = feature package (`payment`, `session`, `catalog`, `user`, `transaction`, `common`).
+- Commits: Conventional Commits, `type(scope): summary`, scope = feature package (`payment`, `payload`, `catalog`, `user`, `transaction`, `common`).
 - Never push to `main`. Never force-push. Never skip hooks.
 
 ## Commands
@@ -95,11 +95,11 @@ Use the Maven wrapper. Integration tests (`*IT`) need Docker running (Testcontai
 | Format | `./mvnw spotless:apply` |
 | Build + formatting check + all tests | `./mvnw verify` |
 | Unit tests only | `./mvnw test` |
-| One integration test | `./mvnw verify -Dit.test=SessionIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false` |
+| One integration test | `./mvnw verify -Dit.test=ConfirmIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false` |
 | Certificates / SPKI pins | `TLS_KEYSTORE_PASSWORD=... ./scripts/generate-certs.sh` |
 | Run locally | `docker compose up --build` → `https://api.momknpay.local/docs` |
 | Lint the contract | `npx @redocly/cli lint docs/openapi.yaml` |
-| Postman collection against the local stack | `npx newman run postman/momknpay.postman_collection.json --insecure --env-var "baseUrl=https://localhost/v1"` |
+| Postman collection against the local stack | `npx newman run postman/momknpay.postman_collection.json --ssl-extra-ca-certs certs/cert.pem --env-var "payloadKey=<APP_PAYLOAD_KEY from .env>"` |
 | After editing `postman/momkn-encrypt.js` | `node scripts/verify-postman-crypto.js && node scripts/sync-postman-crypto.js` |
 | Performance smoke test (throwaway DB) | `docker compose up -d && node scripts/perf-smoke.js && docker compose down -v` |
 | Secret scan of the git history | `docker run --rm -v "$(pwd -W):/repo" zricethezav/gitleaks:v8.30.1 git /repo --config /repo/.gitleaks.toml --redact` (Git Bash: prefix `MSYS_NO_PATHCONV=1`) |
