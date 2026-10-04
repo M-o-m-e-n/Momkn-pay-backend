@@ -167,7 +167,7 @@ InquiryResponse inquiry(...) {
 | Rule | Level |
 |---|---|
 | Use **records** for DTOs, payloads, value objects and results (`Fees`, `UserRef`). | MUST |
-| Use **sealed interfaces** + records for closed result sets (`ConfirmOutcome`), and handle them with exhaustive `switch` pattern matching. No `default` branch on sealed types. | SHOULD |
+| Use **sealed interfaces** + records for closed result sets, and handle them with exhaustive `switch` pattern matching. No `default` branch on sealed types. | SHOULD |
 | Use switch **expressions** (`->`) instead of `switch` statements with `break`. | SHOULD |
 | Fields are `private final` unless there is a reason to mutate them. JPA entities are the exception. | MUST |
 | `var` only when the type is obvious from the right-hand side (`var list = new ArrayList<String>()`). Never for primitives or method results whose type is unclear. | SHOULD |
