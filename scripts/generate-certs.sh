@@ -20,19 +20,25 @@ spki_pin() { # $1 = public key in PEM
   openssl pkey -pubin -in "$1" -outform der | openssl dgst -sha256 -binary | openssl enc -base64
 }
 
-# 1. live key + self-signed certificate (EC P-256, SAN for the API host and localhost)
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
-  -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/cert.pem" -days "$DAYS" \
+# 1. live key (kept if it exists, so re-issuing the certificate does not change the live pin)
+if [[ ! -f "$CERT_DIR/key.pem" ]]; then
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$CERT_DIR/key.pem"
+fi
+
+# 2. self-signed certificate (SAN for the API host and localhost). keyCertSign is required:
+#    BoringSSL clients (Postman, Chrome, Android) do not treat a certificate without it as
+#    self-signed, and then refuse it even when it is in their trust store.
+openssl req -x509 -new -key "$CERT_DIR/key.pem" -out "$CERT_DIR/cert.pem" -days "$DAYS" \
   -subj "/CN=$HOST/O=Momkn Pay Capstone" \
   -addext "subjectAltName=DNS:$HOST,DNS:localhost,IP:127.0.0.1" \
-  -addext "keyUsage=digitalSignature" \
+  -addext "keyUsage=digitalSignature,keyCertSign" \
   -addext "extendedKeyUsage=serverAuth" 2>/dev/null
 
-# 2. PKCS#12 keystore loaded by Spring Boot (alias must match server.ssl.key-alias)
+# 3. PKCS#12 keystore loaded by Spring Boot (alias must match server.ssl.key-alias)
 openssl pkcs12 -export -in "$CERT_DIR/cert.pem" -inkey "$CERT_DIR/key.pem" \
   -name momknpay -out "$CERT_DIR/keystore.p12" -passout "pass:$TLS_KEYSTORE_PASSWORD"
 
-# 3. backup key for rotation: NOT deployed, keep it offline
+# 4. backup key for rotation: NOT deployed, keep it offline
 if [[ ! -f "$CERT_DIR/backup-key.pem" ]]; then
   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$CERT_DIR/backup-key.pem"
 fi
