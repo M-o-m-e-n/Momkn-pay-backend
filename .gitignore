@@ -9,6 +9,8 @@ target/
 
 # secrets & local config — never commit
 .env
+.env.*
+!.env.example
 certs/
 *.p12
 *.pem
@@ -25,6 +27,7 @@ Thumbs.db
 # Postman desktop workspace files (per developer)
 postman/.postman/
 postman/postman/
+postman/Momkn Pay v1/
 
 # personal Compose overrides (e.g. publishing the database port locally)
 docker-compose.override.yml
