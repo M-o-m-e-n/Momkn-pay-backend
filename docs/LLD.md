@@ -960,12 +960,11 @@ try {
 The business work runs inside a `TransactionTemplate` and returns a **`ConfirmOutcome`** instead of throwing. Outcomes that must persist state *and* return an error (wrong PIN counter, FAILED transaction) therefore commit first, and are converted to an HTTP error afterwards.
 
 ```java
-sealed interface ConfirmOutcome {
-    record Paid(Transaction txn)                    implements ConfirmOutcome {}  // SUCCESS / PENDING → 200
-    record Declined(Transaction txn)                implements ConfirmOutcome {}  // FAILED → 402
-    record WrongPin()                               implements ConfirmOutcome {}  // → 400 field=pin
-    record Rejected(ErrorCode code)                 implements ConfirmOutcome {}  // 410/409/422/503 without writes
-    record Replay(Transaction txn)                  implements ConfirmOutcome {}  // idempotent replay
+record ConfirmOutcome(ConfirmResponse response, ErrorCode error, String field) {
+    static ConfirmOutcome paid(ConfirmResponse response)          // SUCCESS / PENDING → 200
+    static ConfirmOutcome failed(ErrorCode error)                 // 402/409/410/422/503
+    static ConfirmOutcome failed(ErrorCode error, String field)   // wrong PIN → 400 field=pin
+    ConfirmResponse render()                                      // the response, or throws ApiException(error, field)
 }
 ```
 
@@ -993,20 +992,20 @@ doConfirm(userId, key, req, slow):                        // inside ONE DB trans
     slow = inq.service.isSlow
     again = txnRepo.findByUserIdAndIdempotencyKey(userId, key)       // re-check under the lock
     if again: return replay(again, req.inquiryId, slow)
-    if inq.status == INVALIDATED:                    return Rejected(INQUIRY_INVALIDATED)
-    if inq.status == CONFIRMED:                      return Rejected(INQUIRY_ALREADY_CONFIRMED)
-    if inq.isExpired(now):                           return Rejected(INQUIRY_EXPIRED)
-    if !inq.service.isActive:                        return Rejected(SERVICE_UNAVAILABLE)
+    if inq.status == INVALIDATED:                    return failed(INQUIRY_INVALIDATED)
+    if inq.status == CONFIRMED:                      return failed(INQUIRY_ALREADY_CONFIRMED)
+    if inq.isExpired(now):                           return failed(INQUIRY_EXPIRED)
+    if !inq.service.isActive:                        return failed(SERVICE_UNAVAILABLE)
 
     p = decryptor.decrypt(req.payload, ConfirmPayload.class)                      // throws → rollback (nothing written)
     if p.pin == null or !p.pin.matches("\\d{4}"):    throw VALIDATION_ERROR("pin")  // format error, no counter
     if !bcrypt.matches(p.pin, user.pinHash):
         inq.registerWrongPin()                                         // 3rd → INVALIDATED
         log.info("payment.pin_failed inquiryId={} attempts={}", inq.id, inq.failedPinAttempts)
-        return WrongPin()
+        return failed(VALIDATION_ERROR, "pin")
 
     if inq.rule == LARGE or inq.amountDue > svc.maxAmount or inq.amountDue < svc.minAmount:
-        return Rejected(AMOUNT_OUT_OF_RANGE)
+        return failed(AMOUNT_OUT_OF_RANGE)
 
     seq = txnRepo.nextSeq()
     t = Transaction(id = "txn_" + seq, seq, userId, inq, key,
@@ -1017,19 +1016,21 @@ doConfirm(userId, key, req, slow):                        // inside ONE DB trans
         DECLINE → t.status = FAILED;  t.failureCode = "INSUFFICIENT_BALANCE"   // inquiry stays OPEN
     txnRepo.saveAndFlush(t)                                  // flush → constraint violations surface here
     log.info("payment.confirmed txnId={} status={} inquiryId={}", t.id, t.status, inq.id)
-    return t.status == FAILED ? Declined(t) : Paid(t)
+    return outcomeOf(t)
 
 replay(txn, inquiryId, slow):
     slow = txn.service.isSlow
-    if !txn.inquiryId.equals(inquiryId):  return Rejected(IDEMPOTENCY_CONFLICT)
+    if !txn.inquiryId.equals(inquiryId):  return failed(IDEMPOTENCY_CONFLICT)
     log.info("payment.replayed txnId={}", txn.id)
-    return Replay(pendingResolver.resolveIfDue(txn))
+    return outcomeOf(pendingResolver.resolveIfDue(txn))              // current status
+
+outcomeOf(txn):
+    txn.status == FAILED                              → failed(ErrorCode(txn.failureCode))   // INSUFFICIENT_BALANCE
+    otherwise (SUCCESS / PENDING)                     → paid(ConfirmResponse.from(txn))
 
 render(outcome):
-    Paid(t) | Replay(t) with status SUCCESS/PENDING → 200 ConfirmResponse(t)
-    Declined(t) | Replay(t) with status FAILED        → throw ApiException(INSUFFICIENT_BALANCE)
-    WrongPin                                          → throw ApiException(VALIDATION_ERROR, "pin")
-    Rejected(code)                                    → throw ApiException(code)
+    outcome.error != null                             → throw ApiException(error, field)
+    otherwise                                         → 200 outcome.response
 ```
 
 **Why this order:**
