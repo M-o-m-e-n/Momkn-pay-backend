@@ -28,7 +28,7 @@ gantt
     section M0 Contract
     Bootstrap + OpenAPI draft      :m0, 2026-10-05, 2d
     section M1 Foundations
-    Platform, crypto, sessions     :m1, after m0, 3d
+    Platform, crypto, payloads     :m1, after m0, 3d
     section M2 Catalogue & profile
     Services, sync, profile        :m2, after m1, 5d
     section M3 Payments
@@ -40,7 +40,7 @@ gantt
 | Milestone | Days | Theme | Demo (gate) |
 |---|---|---|---|
 | [M0](#m0--bootstrap-and-contract-freeze-days-12) | 1–2 | Bootstrap and contract freeze | OpenAPI 3.1 published. Clients run a mock server from it. |
-| [M1](#m1--platform-foundations-days-35) | 3–5 | Platform, crypto, sessions | `docker compose up` over HTTPS. Create a session. Pinning rejects a proxy. |
+| [M1](#m1--platform-foundations-days-35) | 3–5 | Platform, crypto, encrypted payloads | `docker compose up` over HTTPS. An encrypted payload decrypts. Pinning rejects a proxy. |
 | [M2](#m2--catalogue-and-profile-days-610) | 6–10 | Catalogue, sync, profile | Both apps load the catalogue, go offline and still search it. Profile edit works. |
 | [M3](#m3--payment-flow-days-1115) | 11–15 | Inquiry, confirm, history | A full encrypted payment, then every mock rule on purpose. |
 | [M4](#m4--hardening-and-release-days-1620) | 16–20 | Tests, audit, docs, release | Clean-machine `docker compose up`, `v1.0` tag, final demo. |
@@ -116,8 +116,10 @@ flowchart LR
 
 - [ ] **M1 complete** (all slices done and the exit demo passed) *(all slices merged; the proxy-rejection part of the demo is on the client tracks)*
 
-**Goal:** everything that later features rely on: database, errors, headers, TLS, Docker, crypto, sessions.
-**Exit demo:** `docker compose up` → `https://api.momknpay.local/docs` loads. `POST /sessions` returns a key. A client behind mitmproxy fails to connect because of pinning.
+**Goal:** everything that later features rely on: database, errors, headers, TLS, Docker, crypto, encrypted payloads.
+**Exit demo:** `docker compose up` → `https://api.momknpay.local/docs` loads. An encrypted inquiry payload is decrypted with the shared key. A client behind mitmproxy fails to connect because of pinning.
+
+> **History:** M1 originally delivered sessions (M1-S8, and the session parts of S7, S9 and S10). They were removed in [M5](#m5--remove-sessions-after-v10) (ADR-011); the ticked task lines below record what was built at the time, not current behaviour.
 
 - [x] **M1-S1 · Database schema**
   - [x] `V1__schema.sql` exactly as in LLD §4.1 (tables, checks, unique and partial indexes, `transaction_seq`, `updated_at` trigger).

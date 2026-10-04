@@ -394,7 +394,7 @@ void threeWrongPinsInvalidateInquiry() {
 | `main` is protected. No direct pushes. | MUST |
 | One slice = one ticket = one branch = one pull request (see [MILESTONES.md](MILESTONES.md)). | MUST |
 | Branch names: `feature/<slice-id>-<short-name>` or `fix/<ticket>-<short-name>` (for example `feature/M3-S5-idempotency`). | MUST |
-| **Conventional Commits**: `type(scope): summary` in the imperative mood, ≤ 72 characters. Types: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `build`, `ci`. Scope = feature package (`payment`, `session`, `catalog`, …). | MUST 🔧 (commitlint) |
+| **Conventional Commits**: `type(scope): summary` in the imperative mood, ≤ 72 characters. Types: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `build`, `ci`. Scope = feature package (`payment`, `payload`, `catalog`, …). | MUST 🔧 (commitlint) |
 | Pull requests are ≤ ~400 changed lines (excluding generated files and migrations of seed data). Larger ones are split. | MUST |
 | Pull request description: what and why, the linked ticket, test evidence (test names, Postman run or screenshot), and any contract impact. | MUST |
 | One peer approval + one mentor approval, and CI green, before merging. | MUST |
