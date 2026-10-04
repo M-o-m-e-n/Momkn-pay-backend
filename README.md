@@ -80,7 +80,7 @@ In the Postman app: Settings → Certificates → CA certificates → select `ce
 
 `scripts/generate-certs.sh` writes a self-signed certificate for `api.momknpay.local` (the SAN also covers `localhost`), the PKCS#12 keystore the API loads, an offline backup key, and `certs/pins.txt` with the **live** and **backup** SPKI SHA-256 pins.
 
-Every run creates a new key. The backend track therefore generates the certificate **once**, shares `certs/keystore.p12` privately (never through git), and publishes both pins from `pins.txt` to the iOS and Android tracks and the contract repository. Clients pin both hashes, so the key can later be rotated to the backup. To check a running server against the certificate:
+A run keeps an existing `certs/key.pem` and only re-issues the certificate, so the live pin stays the same; delete `certs/` to start over with a new key and new pins. The backend track generates the certificate **once**, shares `certs/keystore.p12` privately (never through git), and publishes both pins from `pins.txt` to the iOS and Android tracks and the contract repository. Clients pin both hashes, so the key can later be rotated to the backup. To check a running server against the certificate:
 
 ```bash
 curl --cacert certs/cert.pem --resolve api.momknpay.local:443:127.0.0.1 https://api.momknpay.local/actuator/health
