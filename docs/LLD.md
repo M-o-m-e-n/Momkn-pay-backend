@@ -655,7 +655,7 @@ public record ConfirmResponse(String transactionId, TransactionStatus status, St
 | | |
 |---|---|
 | Success | `200` |
-| Errors | `404 TRANSACTION_NOT_FOUND` (unknown or foreign), `404 USER_NOT_FOUND` |
+| Errors | `400 VALIDATION_ERROR` (headers, `id` longer than 32 characters), `404 TRANSACTION_NOT_FOUND` (unknown or foreign), `404 USER_NOT_FOUND` |
 
 ```json
 {
@@ -971,24 +971,28 @@ sealed interface ConfirmOutcome {
 
 ```
 confirm(userId, key, req):
+    slow = false                                          // decided inside the transaction, used after it
+    try {
+        try {
+            outcome = txTemplate.execute(s -> doConfirm(userId, key, req, slow))
+        } catch (DataIntegrityViolationException e) {     // lost a race on ux_txn_idempotency
+            outcome = txTemplate.execute(s ->
+                replay(txnRepo.findByUserIdAndIdempotencyKey(userId, key) else rethrow e, req.inquiryId, slow))
+        }
+        return render(outcome)                            // after commit: 200 or the error envelope
+    } finally {
+        slowDelay.applyIf(slow)                           // _slow → +8 s on every path (replays too), no lock held
+    }
+
+doConfirm(userId, key, req, slow):                        // inside ONE DB transaction
     // 1. fast replay path — before any decryption (HLD §8.4)
     existing = txnRepo.findByUserIdAndIdempotencyKey(userId, key)
-    if existing: return render(replay(existing, req.inquiryId))
+    if existing: return replay(existing, req.inquiryId, slow)
 
-    outcome = null; svc = null
-    try {
-        outcome = txTemplate.execute(s -> doConfirm(userId, key, req))
-    } catch (DataIntegrityViolationException e) {         // lost a race on ux_txn_idempotency
-        outcome = replay(txnRepo.findByUserIdAndIdempotencyKey(userId, key).orElseThrow(), req.inquiryId)
-    } finally {
-        slowDelay.applyIf(serviceOf(req.inquiryId))       // _slow → +8 s, after commit, before responding
-    }
-    return render(outcome)
-
-doConfirm(userId, key, req):                              // inside ONE DB transaction
     inq = inquiryRepo.findForUpdate(req.inquiryId, userId)          else throw INQUIRY_NOT_FOUND
+    slow = inq.service.isSlow
     again = txnRepo.findByUserIdAndIdempotencyKey(userId, key)       // re-check under the lock
-    if again: return replay(again, req.inquiryId)
+    if again: return replay(again, req.inquiryId, slow)
     if inq.status == INVALIDATED:                    return Rejected(INQUIRY_INVALIDATED)
     if inq.status == CONFIRMED:                      return Rejected(INQUIRY_ALREADY_CONFIRMED)
     if inq.isExpired(now):                           return Rejected(INQUIRY_EXPIRED)
@@ -1015,7 +1019,8 @@ doConfirm(userId, key, req):                              // inside ONE DB trans
     log.info("payment.confirmed txnId={} status={} inquiryId={}", t.id, t.status, inq.id)
     return t.status == FAILED ? Declined(t) : Paid(t)
 
-replay(txn, inquiryId):
+replay(txn, inquiryId, slow):
+    slow = txn.service.isSlow
     if !txn.inquiryId.equals(inquiryId):  return Rejected(IDEMPOTENCY_CONFLICT)
     log.info("payment.replayed txnId={}", txn.id)
     return Replay(pendingResolver.resolveIfDue(txn))
