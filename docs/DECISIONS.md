@@ -34,7 +34,7 @@ flowchart TD
 | [004](#adr-004--users-come-only-from-seed-data) | Users come only from seed data | Accepted |
 | [005](#adr-005--remove-passwords-keep-the-pin) | Remove passwords, keep the PIN | Accepted |
 | [006](#adr-006--move-the-login-rate-limit-to-post-sessions) | Move the login rate limit to `POST /sessions` | Amended by ADR-011 |
-| [007](#adr-007--add-specific-error-codes-for-the-new-failure-paths) | Add specific error codes for the new failure paths | Accepted |
+| [007](#adr-007--add-specific-error-codes-for-the-new-failure-paths) | Add specific error codes for the new failure paths | Amended by ADR-011 |
 | [008](#adr-008--check-idempotency-before-decrypting) | Check idempotency before decrypting | Accepted |
 | [009](#adr-009--spring-boot-and-java-25) | Spring Boot and Java 25 | Accepted |
 | [010](#adr-010--confirm-gets-a-500-ms-latency-budget-bcrypt-stays-at-cost-12) | Confirm gets a 500 ms latency budget; bcrypt stays at cost 12 | Accepted |
@@ -70,7 +70,7 @@ The backend has **no authentication module**. Every endpoint is public. There is
 - ✅ About a week of backend time is freed for payments, encryption, idempotency and tests.
 - ✅ Clients integrate against real endpoints earlier.
 - ❌ **Anyone who can reach the API can act as any user.** This is accepted only because this is a teaching environment with simulated money. It is stated in SRS §8 (L-1), the README and the final review.
-- ❌ The client tracks lose the brief's secure token storage and 401-refresh learning goals. Secure storage still applies to the session key (memory only).
+- ❌ The client tracks lose the brief's secure token storage and 401-refresh learning goals. Secure storage still applies to the payload key (since ADR-011 a static key built into the app, no longer a session key).
 - ➡️ Leads to ADR-002 to ADR-008.
 
 ---
@@ -99,7 +99,7 @@ User-scoped endpoints require an `X-User-Id` header (for example `usr_01`), and 
 ### Consequences
 - ✅ Contract paths unchanged, and one replaceable place to add auth later.
 - ❌ The header can be forged (see ADR-001).
-- The server still checks that the user exists (`USER_NOT_FOUND`) and that sessions, inquiries and transactions belong to that user. A caller cannot mix another user's data into its own requests by mistake.
+- The server still checks that the user exists (`USER_NOT_FOUND`) and that inquiries and transactions belong to that user. A caller cannot mix another user's data into its own requests by mistake.
 
 ---
 
@@ -205,7 +205,9 @@ Rate-limit `POST /sessions` and `POST /payments/confirm` to 5 per minute per `X-
 
 ## ADR-007 — Add specific error codes for the new failure paths
 
-**Status:** Accepted · **Affects:** SRS §4.4, LLD §7.1
+**Status:** Amended by ADR-011 on 2026-10-01 · **Affects:** SRS §4.4, LLD §7.1
+
+> `SESSION_NOT_FOUND` and `SESSION_EXPIRED` were removed with sessions (ADR-011). The other codes and the reasoning below still hold; the current list is in SRS §4.4.
 
 ### Context
 Removing auth deletes `INVALID_CREDENTIALS`, `TOKEN_EXPIRED` and `MOBILE_ALREADY_USED`. Sessions, header-based identity and stricter confirm rules create new failure paths. The brief requires clients to switch on the error `code`, never on the message.
@@ -293,7 +295,7 @@ Keep bcrypt at cost 12. Give `POST /payments/confirm` its own p95 budget of **50
 
 ## ADR-011 — Remove sessions; encrypt payloads with one static shared key
 
-**Status:** Accepted · **Date:** 2026-10-01 · **Supersedes:** ADR-003 · **Amends:** ADR-006 · **Affects:** contract v2.0.0, SRS §3.2 (FR-ENC), HLD §8.1 and §10, LLD §4.1.1 and §8
+**Status:** Accepted · **Date:** 2026-10-01 · **Supersedes:** ADR-003 · **Amends:** ADR-006, ADR-007 · **Affects:** contract v2.0.0, SRS §3.2 (FR-ENC), HLD §8.1 and §10, LLD §4.1.1 and §8
 
 ### Context
 ADR-003 kept the brief's per-login `sessionKey` by adding `POST /sessions`: a client asked for a 30-minute AES key, sent its id in `X-Session-Id`, and the server stored the key wrapped with a master key. It worked, but it was machinery around something that protects nothing here: anyone could ask for a session for any user, because there is no authentication (ADR-001).
