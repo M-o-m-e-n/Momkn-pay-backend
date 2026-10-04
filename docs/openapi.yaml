@@ -23,7 +23,7 @@ info:
     ## Changelog
     | Version | Date | Change |
     |---|---|---|
-    | 1.0.0 | 2026-10-06 | Initial contract (no-auth variant of the capstone brief). |
+    | 1.0.0 | 2026-09-30 | Initial contract (no-auth variant of the capstone brief). |
     | 2.0.0 | 2026-10-01 | **Breaking.** Sessions removed: `POST /sessions`, `DELETE /sessions/{sessionId}` and the `X-Session-Id` header are gone; payloads are encrypted with one static shared key. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` removed; inquiry no longer returns 410. (ADR-011) |
 # Deliberately public: no security schemes (ADR-001).
 security: []
