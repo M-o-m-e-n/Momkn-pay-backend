@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.TestcontainersConfiguration;
+import com.momknpay.session.service.SessionService;
 import com.momknpay.support.PaymentClient;
 import com.momknpay.transaction.service.PendingResolver;
 import java.sql.Timestamp;
@@ -30,14 +31,15 @@ import org.springframework.test.web.servlet.MockMvc;
 class PendingIT {
 
     @Autowired private MockMvc mvc;
+    @Autowired private SessionService sessionService;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PendingResolver pendingResolver;
 
     private PaymentClient mina;
 
     @BeforeEach
-    void newClient() {
-        mina = new PaymentClient(mvc, "usr_01");
+    void openSession() {
+        mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
     }
 
     @Test

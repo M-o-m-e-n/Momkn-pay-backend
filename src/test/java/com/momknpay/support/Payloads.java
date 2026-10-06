@@ -1,26 +1,26 @@
 package com.momknpay.support;
 
-/** Encrypted request payloads built the way the mobile clients build them (shared test key). */
+/** Encrypted request payloads built the way the mobile clients build them. */
 public final class Payloads {
 
     private Payloads() {}
 
-    public static String inquiry(String subscriberNumber) {
-        return inquiry(subscriberNumber, TestCrypto.nowTs());
+    public static String inquiry(String sessionKey, String subscriberNumber) {
+        return inquiry(sessionKey, subscriberNumber, TestCrypto.nowTs());
     }
 
-    public static String inquiry(String subscriberNumber, long ts) {
+    public static String inquiry(String sessionKey, String subscriberNumber, long ts) {
         return TestCrypto.encrypt(
-                TestCrypto.TEST_PAYLOAD_KEY,
+                sessionKey,
                 """
                 {"subscriberNumber":"%s","nonce":"%s","ts":%d}\
                 """
                         .formatted(subscriberNumber, TestCrypto.nonce(), ts));
     }
 
-    public static String confirm(String pin) {
+    public static String confirm(String sessionKey, String pin) {
         return TestCrypto.encrypt(
-                TestCrypto.TEST_PAYLOAD_KEY,
+                sessionKey,
                 """
                 {"pin":"%s","nonce":"%s","ts":%d}\
                 """

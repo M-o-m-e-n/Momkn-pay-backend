@@ -9,11 +9,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.common.web.Headers;
+import com.momknpay.session.service.SessionService;
+import com.momknpay.session.web.dto.CreateSessionResponse;
 import com.momknpay.support.Payloads;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,12 +38,20 @@ import org.springframework.test.web.servlet.ResultActions;
 class InquiryIT {
 
     @Autowired private MockMvc mvc;
+    @Autowired private SessionService sessionService;
     @Autowired private JdbcTemplate jdbc;
+
+    private CreateSessionResponse session;
+
+    @BeforeEach
+    void openSession() {
+        session = sessionService.create("usr_01");
+    }
 
     @Test
     void workedExampleReturnsTheContractQuote(CapturedOutput output) throws Exception {
         String body =
-                inquire("svc_elec_cairo", Payloads.inquiry("1024750891"))
+                inquire("svc_elec_cairo", Payloads.inquiry(session.sessionKey(), "1024750891"))
                         .andExpect(status().isOk())
                         .andExpect(jsonPath("$.serviceId").value("svc_elec_cairo"))
                         .andExpect(jsonPath("$.customerName").value("Mina A."))
@@ -63,6 +74,7 @@ class InquiryIT {
                 jdbc.queryForMap("SELECT * FROM inquiries WHERE id = ?", inquiryId);
         assertThat(row)
                 .containsEntry("user_id", "usr_01")
+                .containsEntry("session_id", session.sessionId())
                 .containsEntry("rule", "NORMAL")
                 .containsEntry("status", "OPEN")
                 .containsEntry("total", 25320L);
@@ -73,17 +85,17 @@ class InquiryIT {
 
     @Test
     void lastDigitRulesReachTheClient() throws Exception {
-        inquire("svc_elec_cairo", Payloads.inquiry("1024750890"))
+        inquire("svc_elec_cairo", Payloads.inquiry(session.sessionKey(), "1024750890"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("SUBSCRIBER_NOT_FOUND"));
-        inquire("svc_elec_cairo", Payloads.inquiry("1024750899"))
+        inquire("svc_elec_cairo", Payloads.inquiry(session.sessionKey(), "1024750899"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("BILL_ALREADY_PAID"));
-        inquire("svc_elec_cairo", Payloads.inquiry("1024750896"))
+        inquire("svc_elec_cairo", Payloads.inquiry(session.sessionKey(), "1024750896"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.amountDue").value(510000)); // above maxAmount 500000
         for (String subscriber : new String[] {"1024750897", "1024750898"}) {
-            inquire("svc_elec_cairo", Payloads.inquiry(subscriber))
+            inquire("svc_elec_cairo", Payloads.inquiry(session.sessionKey(), subscriber))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.total").value(25320));
         }
@@ -91,7 +103,7 @@ class InquiryIT {
 
     @Test
     void subscriberNumberMustMatchTheServicePattern() throws Exception {
-        inquire("svc_elec_cairo", Payloads.inquiry("102475089")) // 9 digits
+        inquire("svc_elec_cairo", Payloads.inquiry(session.sessionKey(), "102475089")) // 9 digits
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.error.field").value("subscriberNumber"));
@@ -99,7 +111,7 @@ class InquiryIT {
 
     @Test
     void unknownDeletedAndInactiveServices() throws Exception {
-        String payload = Payloads.inquiry("1024750891");
+        String payload = Payloads.inquiry(session.sessionKey(), "1024750891");
         inquire("svc_nope", payload)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("SERVICE_NOT_FOUND"));
@@ -112,7 +124,7 @@ class InquiryIT {
 
     @Test
     void replayedPayloadIsRejected() throws Exception {
-        String payload = Payloads.inquiry("1024750891");
+        String payload = Payloads.inquiry(session.sessionKey(), "1024750891");
         inquire("svc_elec_cairo", payload).andExpect(status().isOk());
 
         inquire("svc_elec_cairo", payload)
@@ -121,10 +133,32 @@ class InquiryIT {
     }
 
     @Test
+    void sessionHeaderIsRequiredAndMustBeTheUsersOwn() throws Exception {
+        String payload = Payloads.inquiry(session.sessionKey(), "1024750891");
+        mvc.perform(
+                        withClientHeaders(post("/v1/payments/inquiry"))
+                                .header(Headers.USER_ID, "usr_01")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body("svc_elec_cairo", payload)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.field").value("X-Session-Id"));
+
+        mvc.perform(
+                        withClientHeaders(post("/v1/payments/inquiry"))
+                                .header(Headers.USER_ID, "usr_02")
+                                .header(Headers.SESSION_ID, session.sessionId())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body("svc_elec_cairo", payload)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("SESSION_NOT_FOUND"));
+    }
+
+    @Test
     void slowServiceAnswersLate() throws Exception {
         long start = System.nanoTime();
 
-        inquire("svc_elec_canal_slow", Payloads.inquiry("1024750891")).andExpect(status().isOk());
+        inquire("svc_elec_canal_slow", Payloads.inquiry(session.sessionKey(), "1024750891"))
+                .andExpect(status().isOk());
 
         assertThat(Duration.ofNanos(System.nanoTime() - start))
                 .isGreaterThanOrEqualTo(Duration.ofMillis(200)); // test delay, 8 s in production
@@ -134,6 +168,7 @@ class InquiryIT {
         return mvc.perform(
                 withClientHeaders(post("/v1/payments/inquiry"))
                         .header(Headers.USER_ID, "usr_01")
+                        .header(Headers.SESSION_ID, session.sessionId())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(serviceId, payload)));
     }

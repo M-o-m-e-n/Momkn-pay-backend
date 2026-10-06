@@ -5,7 +5,6 @@ import com.momknpay.common.config.AppProperties;
 import com.momknpay.common.error.ApiException;
 import com.momknpay.common.error.ErrorCode;
 import com.momknpay.common.util.TimeProvider;
-import com.momknpay.payload.service.PayloadDecryptor;
 import com.momknpay.payment.domain.Inquiry;
 import com.momknpay.payment.domain.InquiryStatus;
 import com.momknpay.payment.domain.MockRule;
@@ -13,6 +12,7 @@ import com.momknpay.payment.repository.InquiryRepository;
 import com.momknpay.payment.web.dto.ConfirmPayload;
 import com.momknpay.payment.web.dto.ConfirmRequest;
 import com.momknpay.payment.web.dto.ConfirmResponse;
+import com.momknpay.session.service.PayloadDecryptor;
 import com.momknpay.transaction.domain.Transaction;
 import com.momknpay.transaction.domain.TransactionStatus;
 import com.momknpay.transaction.repository.TransactionRepository;
@@ -89,7 +89,8 @@ public class ConfirmService {
         this.properties = properties;
     }
 
-    public ConfirmResponse confirm(String userId, UUID idempotencyKey, ConfirmRequest request) {
+    public ConfirmResponse confirm(
+            String userId, String sessionId, UUID idempotencyKey, ConfirmRequest request) {
         AtomicBoolean slow = new AtomicBoolean(); // decided in the transaction, used after it
         try {
             ConfirmOutcome outcome;
@@ -98,7 +99,7 @@ public class ConfirmService {
                         tx.execute(
                                 status ->
                                         confirmInTransaction(
-                                                userId, idempotencyKey, request, slow));
+                                                userId, sessionId, idempotencyKey, request, slow));
             } catch (DataIntegrityViolationException raceLost) {
                 outcome =
                         tx.execute(
@@ -114,7 +115,11 @@ public class ConfirmService {
     }
 
     private ConfirmOutcome confirmInTransaction(
-            String userId, UUID idempotencyKey, ConfirmRequest request, AtomicBoolean slow) {
+            String userId,
+            String sessionId,
+            UUID idempotencyKey,
+            ConfirmRequest request,
+            AtomicBoolean slow) {
         // 1. replay path, before any decryption
         Optional<Transaction> existing = findByKey(userId, idempotencyKey);
         if (existing.isPresent()) {
@@ -149,7 +154,8 @@ public class ConfirmService {
         }
 
         // 4. the PIN (decryption failures throw and roll back; the nonce stays consumed)
-        ConfirmPayload payload = decryptor.decrypt(request.payload(), ConfirmPayload.class);
+        ConfirmPayload payload =
+                decryptor.decrypt(sessionId, userId, request.payload(), ConfirmPayload.class);
         if (payload.pin() == null || !PIN.matcher(payload.pin()).matches()) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "pin");
         }

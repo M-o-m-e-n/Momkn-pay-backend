@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.momknpay.TestcontainersConfiguration;
+import com.momknpay.session.service.SessionService;
 import com.momknpay.support.Payloads;
 import com.momknpay.support.PaymentClient;
 import java.util.List;
@@ -24,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class ConfirmFailuresIT {
 
     @Autowired private MockMvc mvc;
+    @Autowired private SessionService sessionService;
     @Autowired private JdbcTemplate jdbc;
 
     @Test
@@ -85,7 +87,7 @@ class ConfirmFailuresIT {
         PaymentClient mina = client("usr_01");
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750897");
         UUID key = UUID.randomUUID();
-        String payload = Payloads.confirm("1234");
+        String payload = Payloads.confirm(mina.sessionKey(), "1234");
 
         mina.confirmWithPayload(inquiryId, key, payload)
                 .andExpect(status().isPaymentRequired())
@@ -130,7 +132,7 @@ class ConfirmFailuresIT {
     }
 
     private PaymentClient client(String userId) {
-        return new PaymentClient(mvc, userId);
+        return new PaymentClient(mvc, userId, sessionService.create(userId));
     }
 
     private String inquiryColumn(String inquiryId, String column) {

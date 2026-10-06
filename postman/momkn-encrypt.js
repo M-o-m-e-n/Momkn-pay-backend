@@ -139,7 +139,7 @@ function momknEncrypt(keyBase64, plaintext, ivOverride) {
     }
 
     const key = fromBase64(keyBase64);
-    if (key.length !== 32) throw new Error('the payload key must be base64 of 32 bytes');
+    if (key.length !== 32) throw new Error('sessionKey must be base64 of 32 bytes');
     const words = expandKey(key);
     const iv = ivOverride || randomBytes(12);
     const hashKey = encryptBlock(words, new Array(16).fill(0));

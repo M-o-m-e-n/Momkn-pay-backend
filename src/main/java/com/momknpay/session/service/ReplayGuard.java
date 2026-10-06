@@ -1,11 +1,11 @@
-package com.momknpay.payload.service;
+package com.momknpay.session.service;
 
 import com.momknpay.common.config.AppProperties;
 import com.momknpay.common.error.ApiException;
 import com.momknpay.common.error.ErrorCode;
 import com.momknpay.common.util.TimeProvider;
-import com.momknpay.payload.domain.UsedNonce;
-import com.momknpay.payload.repository.UsedNonceRepository;
+import com.momknpay.session.domain.UsedNonce;
+import com.momknpay.session.repository.UsedNonceRepository;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,8 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Rejects stale and replayed payloads (NFR-SEC-2…3): {@code ts} must be within the replay window of
  * server time, and each nonce is accepted once — enforced by the {@code used_nonces} primary key.
- * With one shared key for every client (ADR-011) this is what stops a captured payload from being
- * sent again.
  */
 @Component
 public class ReplayGuard {
@@ -40,16 +38,16 @@ public class ReplayGuard {
      * transaction later rolls back: a payload is single-use whatever the outcome.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void check(String nonce, long ts) {
+    public void check(String sessionId, String nonce, long ts) {
         Instant now = time.now();
         if (Math.abs(now.getEpochSecond() - ts) > windowSeconds) {
-            log.warn("payload.rejected reason=stale_ts");
+            log.warn("payload.rejected reason=stale_ts sessionId={}", sessionId);
             throw new ApiException(ErrorCode.DECRYPTION_FAILED);
         }
         try {
-            nonces.saveAndFlush(new UsedNonce(nonce, now));
+            nonces.saveAndFlush(new UsedNonce(nonce, sessionId, now));
         } catch (DataIntegrityViolationException e) {
-            log.warn("payload.rejected reason=replayed_nonce");
+            log.warn("payload.rejected reason=replayed_nonce sessionId={}", sessionId);
             throw new ApiException(ErrorCode.DECRYPTION_FAILED);
         }
     }

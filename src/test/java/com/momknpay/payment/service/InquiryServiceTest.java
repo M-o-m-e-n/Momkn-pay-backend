@@ -16,11 +16,11 @@ import com.momknpay.common.error.ApiException;
 import com.momknpay.common.error.ErrorCode;
 import com.momknpay.common.util.IdGenerator;
 import com.momknpay.common.util.TimeProvider;
-import com.momknpay.payload.service.PayloadDecryptor;
 import com.momknpay.payment.engine.MockPaymentEngine;
 import com.momknpay.payment.repository.InquiryRepository;
 import com.momknpay.payment.web.dto.InquiryPayload;
 import com.momknpay.payment.web.dto.InquiryRequest;
+import com.momknpay.session.service.PayloadDecryptor;
 import java.time.Duration;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -42,6 +42,7 @@ class InquiryServiceTest {
                     mock(TimeProvider.class),
                     new AppProperties(
                             "unused",
+                            Duration.ofMinutes(30),
                             Duration.ofMinutes(5),
                             Duration.ofSeconds(120),
                             Duration.ofMinutes(5),
@@ -54,7 +55,7 @@ class InquiryServiceTest {
         BillerService alex = service("svc_elec_alex", false);
 
         assertFails(new InquiryRequest("svc_elec_alex", "blob"), ErrorCode.SERVICE_UNAVAILABLE);
-        verify(decryptor, never()).decrypt(anyString(), any());
+        verify(decryptor, never()).decrypt(anyString(), anyString(), anyString(), any());
         verify(slowDelay).applyIf(alex);
     }
 
@@ -69,7 +70,7 @@ class InquiryServiceTest {
     void slowServiceIsDelayedEvenWhenTheInquiryFails() {
         BillerService canal = service("svc_elec_canal_slow", true);
         when(canal.getInputPattern()).thenReturn("^[0-9]{10}$");
-        when(decryptor.decrypt(eq("blob"), eq(InquiryPayload.class)))
+        when(decryptor.decrypt(eq("ses_1"), eq("usr_01"), eq("blob"), eq(InquiryPayload.class)))
                 .thenReturn(new InquiryPayload("123", "0".repeat(32), 1L)); // fails the pattern
 
         assertFails(new InquiryRequest("svc_elec_canal_slow", "blob"), ErrorCode.VALIDATION_ERROR);
@@ -85,7 +86,7 @@ class InquiryServiceTest {
     }
 
     private void assertFails(InquiryRequest request, ErrorCode code) {
-        assertThatThrownBy(() -> inquiryService.inquire("usr_01", request))
+        assertThatThrownBy(() -> inquiryService.inquire("usr_01", "ses_1", request))
                 .isInstanceOf(ApiException.class)
                 .extracting("code")
                 .isEqualTo(code);

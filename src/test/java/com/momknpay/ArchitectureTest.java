@@ -53,7 +53,7 @@ class ArchitectureTest {
                     .resideInAnyPackage(
                             "com.momknpay.catalog..",
                             "com.momknpay.user..",
-                            "com.momknpay.payload..",
+                            "com.momknpay.session..",
                             "com.momknpay.payment..",
                             "com.momknpay.transaction..");
 

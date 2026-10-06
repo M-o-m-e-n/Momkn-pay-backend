@@ -2,6 +2,31 @@
 
 All notable changes to the Momkn Pay backend. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/). API contract changes are also recorded in the changelog inside [`docs/openapi.yaml`](docs/openapi.yaml).
 
+## [3.0.0] — 2026-10-06
+
+**Breaking:** sessions are back, as in 1.0.0 (ADR-012). Contract v3.0.0.
+
+### Added
+- `POST /v1/sessions` returns `{ sessionId, sessionKey, expiresAt }` (AES-256 key, valid 30 minutes) and `DELETE /v1/sessions/{sessionId}` revokes it.
+- The `X-Session-Id` header is required again on `POST /v1/payments/inquiry` and `POST /v1/payments/confirm`.
+- Error codes `SESSION_NOT_FOUND` (404) and `SESSION_EXPIRED` (410); there are 22 codes again.
+- Rate limit of 5 per minute per user on `POST /v1/sessions`.
+- Migration `V6__restore_sessions.sql` re-creates the `sessions` table and the `session_id` columns; an existing database upgrades in place.
+
+### Changed
+- Payloads are encrypted with the key of the caller's session, not with a shared key.
+- Configuration: `APP_MASTER_KEY` (wraps session keys at rest) replaces `APP_PAYLOAD_KEY`.
+- The Postman collection creates a session first (38 requests, folders 01–06). It still defaults to `https://localhost/v1` and verifies the server certificate.
+
+### Removed
+- The static shared payload key (`APP_PAYLOAD_KEY`, the `payloadKey` Postman variable).
+
+### Migration for clients
+1. On app start (or before the first payment), call `POST /v1/sessions` with `X-User-Id` and keep `sessionKey` in memory only.
+2. Encrypt `payload` with that key and send `X-Session-Id` on inquiry and confirm.
+3. On `SESSION_EXPIRED`, create a new session and retry; on logout or exit, call `DELETE /v1/sessions/{sessionId}`.
+4. Remove the built-in shared key from the app.
+
 ## [2.0.0] — 2026-10-01
 
 **Breaking:** sessions are removed (ADR-011). Contract v2.0.0.

@@ -97,7 +97,7 @@ JPA entities have **no** suffix: `Inquiry`, `Transaction`, `BillerService`. `Bil
 |---|---|---|
 | JSON fields | `camelCase` | `amountDue`, `expiresAt` |
 | Query parameters | `camelCase` | `since`, `page`, `size` |
-| Custom headers | `X-Pascal-Case` | `X-User-Id`, `X-Request-Id` |
+| Custom headers | `X-Pascal-Case` | `X-User-Id`, `X-Session-Id` |
 | Error codes | `UPPER_SNAKE_CASE` | `INQUIRY_EXPIRED` |
 | Status enums on the wire | `UPPER_CASE` | `SUCCESS`, `PENDING` |
 | Category enum on the wire | lowercase | `electricity` |
@@ -118,7 +118,7 @@ com.momknpay.<feature>.{web, web.dto, service, domain, repository}
 com.momknpay.common.{config, error, web, crypto, ratelimit, util}
 ```
 
-Features: `user`, `payload`, `catalog`, `payment`, `transaction`. Shared code goes in `common` only when **two or more** features use it.
+Features: `user`, `session`, `catalog`, `payment`, `transaction`. Shared code goes in `common` only when **two or more** features use it.
 
 ### 4.2 Layer rules
 
@@ -139,7 +139,7 @@ flowchart LR
 | Services own business rules and transactions. | MUST |
 | Repositories contain queries only, no business logic. | MUST |
 | `common` never depends on a feature package. | MUST 🔧 (ArchUnit) |
-| No package cycles. Allowed direction: `payment → payload, catalog, user, transaction → common` (HLD §6). | MUST 🔧 (ArchUnit) |
+| No package cycles. Allowed direction: `payment → session, catalog, user, transaction → common` (HLD §6). | MUST 🔧 (ArchUnit) |
 | Pure logic (`FeeCalculator`, `MockPaymentEngine`) has no Spring, database or I/O dependencies, so it can be tested without a context. | MUST |
 
 ### 4.3 Controllers stay thin
@@ -148,8 +148,9 @@ flowchart LR
 // ✅ Good: map HTTP to a service call, nothing else
 @PostMapping("/payments/inquiry")
 InquiryResponse inquiry(@CurrentUser UserRef user,
+                        @RequestHeader(Headers.SESSION_ID) String sessionId,
                         @Valid @RequestBody InquiryRequest request) {
-    return inquiryService.inquire(user.id(), request);
+    return inquiryService.inquire(user.id(), sessionId, request);
 }
 
 // ❌ Bad: business logic and repository access in the controller
@@ -211,7 +212,7 @@ InquiryResponse inquiry(...) {
 | Validation lives on the DTO, not in `if` statements in the controller. Business rules that need the database (email uniqueness, inquiry state) live in the service. | MUST |
 | Unknown JSON properties are rejected (`fail-on-unknown-properties: true`). Do not add `@JsonIgnoreProperties(ignoreUnknown = true)`. | MUST |
 | Response DTOs are built by a mapper or a static factory (`ReceiptResponse.from(txn)`), not field by field in the controller. | SHOULD |
-| Status codes: `200` for reads, inquiry and confirm. Errors per SRS §4.4. | MUST |
+| Status codes: `200` for reads and confirm, `201` for `POST /sessions`, `204` for delete. Errors per SRS §4.4. | MUST |
 | Swagger annotations (`@Operation`, `@ApiResponse` with the error codes) on every endpoint. | MUST |
 
 ---
@@ -281,7 +282,7 @@ These rules are what the security part of the grade looks for (brief: *Security 
 |---|---|
 | No secret, key, password, keystore or private key in the repository, ever. Use environment variables and `.env.example`. | MUST 🔧 (gitleaks in CI) |
 | `.env`, `certs/` and `*.p12` / `*.pem` / `*.key` are in `.gitignore`. | MUST |
-| No default values for secrets in `application.yml` (`${APP_PAYLOAD_KEY:}`, never `${APP_PAYLOAD_KEY:abc}`). | MUST |
+| No default values for secrets in `application.yml` (`${APP_MASTER_KEY}`, not `${APP_MASTER_KEY:abc}`). | MUST |
 
 ### 10.2 Cryptography
 
@@ -299,15 +300,15 @@ These rules are what the security part of the grade looks for (brief: *Security 
 | Data | Store | Log | Return in API |
 |---|---|---|---|
 | PIN | bcrypt hash only | **never** | **never** |
-| Payload key (`APP_PAYLOAD_KEY`) | environment only, never in the database | **never** | **never** |
+| Session key | wrapped with the master key only | **never** | only once, in `POST /sessions` |
 | Encrypted payload (`payload`) | **never** | **never** | **never** |
 | Decrypted payload | **never** (in memory only) | **never** | **never** |
 | Subscriber number | plain (needed for the receipt) | **masked** (`******0891`) | on the receipt only |
-| DB password, keystore password | environment only | **never** | **never** |
+| Master key, DB password | environment only | **never** | **never** |
 
 | Rule | Level |
 |---|---|
-| Records that hold sensitive fields (`ConfirmPayload`, `InquiryPayload`, `AppProperties`) override `toString()` to mask them. | MUST |
+| Records that hold sensitive fields (`ConfirmPayload`, `InquiryPayload`, `CreateSessionResponse`) override `toString()` to mask them. | MUST |
 | Never log request or response bodies, even at DEBUG. | MUST |
 | Every lookup of user-owned data filters by the user ID (`findByIdAndUserId`), and returns `…_NOT_FOUND` for another user's data. | MUST |
 | Validate every regular expression from data (`inputPattern`) once and cache the compiled `Pattern`. | SHOULD |
@@ -368,7 +369,7 @@ These rules are what the security part of the grade looks for (brief: *Security 
 | Use the brief's seeded data and worked example (`1024750891` → 25 320) as fixtures, so tests match what clients see. | SHOULD |
 | Encrypted requests in tests go through `TestCrypto`, which mirrors the client (fresh IV, nonce and `ts`). | MUST |
 | Tests are independent and order-free. Each integration test cleans up or uses unique data. | MUST |
-| Coverage is a signal, not a goal. Target ≥ 80% line coverage on `payment`, `payload` and `common.crypto` (JaCoCo report). No "coverage theatre" tests without assertions. | SHOULD |
+| Coverage is a signal, not a goal. Target ≥ 80% line coverage on `payment`, `session` and `common.crypto` (JaCoCo report). No "coverage theatre" tests without assertions. | SHOULD |
 | The required tests from LLD §12 (U1–U19, I1–I10) must exist and pass before `v1.0`. | MUST |
 
 ```java
@@ -394,7 +395,7 @@ void threeWrongPinsInvalidateInquiry() {
 | `main` is protected. No direct pushes. | MUST |
 | One slice = one ticket = one branch = one pull request (see [MILESTONES.md](MILESTONES.md)). | MUST |
 | Branch names: `feature/<slice-id>-<short-name>` or `fix/<ticket>-<short-name>` (for example `feature/M3-S5-idempotency`). | MUST |
-| **Conventional Commits**: `type(scope): summary` in the imperative mood, ≤ 72 characters. Types: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `build`, `ci`. Scope = feature package (`payment`, `payload`, `catalog`, …). | MUST 🔧 (commitlint) |
+| **Conventional Commits**: `type(scope): summary` in the imperative mood, ≤ 72 characters. Types: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `build`, `ci`. Scope = feature package (`payment`, `session`, `catalog`, …). | MUST 🔧 (commitlint) |
 | Pull requests are ≤ ~400 changed lines (excluding generated files and migrations of seed data). Larger ones are split. | MUST |
 | Pull request description: what and why, the linked ticket, test evidence (test names, Postman run or screenshot), and any contract impact. | MUST |
 | One peer approval + one mentor approval, and CI green, before merging. | MUST |
@@ -403,7 +404,7 @@ void threeWrongPinsInvalidateInquiry() {
 
 ```
 feat(payment): return stored transaction for repeated idempotency key
-fix(payload): reject payloads with ts older than 120 seconds
+fix(session): reject payloads with ts older than 120 seconds
 test(crypto): assert fresh IV per encryption
 ```
 

@@ -26,17 +26,18 @@ class RateLimiterTest {
     }
 
     @Test
-    void bucketsAreSeparatePerUser() {
+    void bucketsAreSeparatePerUserAndPerPolicy() {
         for (int i = 0; i < 5; i++) {
             limiter.consume(Policy.CONFIRM, "usr_01");
         }
 
         assertThatCode(() -> limiter.consume(Policy.CONFIRM, "usr_02")).doesNotThrowAnyException();
+        assertThatCode(() -> limiter.consume(Policy.SESSIONS, "usr_01")).doesNotThrowAnyException();
     }
 
     private static AppProperties properties(int perMinute) {
         Duration any = Duration.ofMinutes(5);
         return new AppProperties(
-                "unused", any, any, any, any, any, new AppProperties.RateLimit(perMinute));
+                "unused", any, any, any, any, any, any, new AppProperties.RateLimit(perMinute));
     }
 }
