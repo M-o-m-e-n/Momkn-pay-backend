@@ -4,8 +4,8 @@
 |---|---|
 | Document | Low-Level Design |
 | Product | Momkn Pay — Backend API |
-| Version | 2.0 (contract v2.0.0, paths under `/v1`) |
-| Date | 2026-09-30 |
+| Version | 3.0 (contract v3.0.0, paths under `/v1`) |
+| Date | 2026-10-06 |
 | Related documents | [SRS.md](SRS.md) (requirements), [HLD.md](HLD.md) (architecture) |
 
 ---
@@ -37,7 +37,7 @@
 | Money | `long` in Java, `BIGINT` in SQL, integer piastres. `double`, `float` and `BigDecimal` are never used for money. |
 | Time | `java.time.Instant`, `TIMESTAMPTZ`, UTC, **truncated to seconds** (`TimeProvider.now()`), and serialised as `2026-09-20T10:00:00Z`. |
 | Clock | A `java.time.Clock` bean is injected everywhere so tests can use a fixed or mutable clock. `Instant.now()` is never called directly. |
-| IDs | Prefixed strings: `usr_01`, `svc_elec_cairo`, `inq_<16 hex>`, `txn_<seq>`. Random parts come from `SecureRandom`. |
+| IDs | Prefixed strings: `usr_01`, `svc_elec_cairo`, `ses_<32 hex>`, `inq_<16 hex>`, `txn_<seq>`. Random parts come from `SecureRandom`. |
 | DTOs | Java `record`s in `…web.dto`. Requests carry Bean Validation annotations. Entities are never serialised. |
 | JSON | camelCase. Unknown properties are rejected (`FAIL_ON_UNKNOWN_PROPERTIES = true`). `null` fields are included (the contract has explicit nulls such as `paidAt`). |
 | Enums on the wire | `status`: UPPER_CASE (`SUCCESS`). `category`: lower_case (`electricity`). |
@@ -71,7 +71,8 @@ momknpay-backend/
     │           ├── V1__schema.sql
     │           ├── V2__seed_services.sql
     │           ├── V4__seed_history.sql
-    │           └── V5__drop_sessions.sql
+    │           ├── V5__drop_sessions.sql      # contract v2.0.0 (ADR-011)
+    │           └── V6__restore_sessions.sql   # contract v3.0.0 (ADR-012): same tables and columns as V1
     │       (V3__SeedUsers is a Java migration, see §11.2)
     └── test/java/com/momknpay/...  # see §12
 ```
@@ -90,7 +91,7 @@ com.momknpay
 │   ├── error         ErrorCode, ApiException, ErrorResponse, GlobalExceptionHandler
 │   ├── web           RequestIdFilter, RequiredHeadersInterceptor, RateLimitInterceptor,
 │   │                 CurrentUser (annotation), UserRef, Headers
-│   ├── crypto        AesGcmCipher, PayloadKey, CryptoException
+│   ├── crypto        AesGcmCipher, KeyWrapper, SecureRandoms
 │   ├── ratelimit     RateLimiter, RateLimitPolicy
 │   └── util          IdGenerator, TimeProvider, Masking
 ├── user
@@ -99,10 +100,11 @@ com.momknpay
 │   ├── service       ProfileService, UserLookupService
 │   └── web           ProfileController, CurrentUserArgumentResolver, UserWebConfig,
 │                     dto/{ProfileResponse, UpdateProfileRequest}
-├── payload
-│   ├── domain        UsedNonce
-│   ├── repository    UsedNonceRepository
-│   └── service       PayloadDecryptor, ReplayGuard, NonceCleanupJob, EncryptedPayload
+├── session
+│   ├── domain        Session, UsedNonce
+│   ├── repository    SessionRepository, UsedNonceRepository
+│   ├── service       SessionService, PayloadDecryptor, ReplayGuard, NonceCleanupJob
+│   └── web           SessionController, dto/{CreateSessionResponse}
 ├── catalog
 │   ├── domain        BillerService, ServiceCategory, ServiceCategoryConverter
 │   ├── repository    BillerServiceRepository
@@ -129,29 +131,30 @@ com.momknpay
 ```mermaid
 classDiagram
     class PaymentController {
-        +inquiry(UserRef, InquiryRequest) InquiryResponse
-        +confirm(UserRef, UUID idemKey, ConfirmRequest) ConfirmResponse
+        +inquiry(UserRef, sessionId, InquiryRequest) InquiryResponse
+        +confirm(UserRef, sessionId, UUID idemKey, ConfirmRequest) ConfirmResponse
     }
     class InquiryService {
-        +inquire(String userId, InquiryRequest) InquiryResponse
+        +inquire(String userId, String sessionId, InquiryRequest) InquiryResponse
     }
     class ConfirmService {
         -TransactionTemplate tx
-        +confirm(String userId, UUID key, ConfirmRequest) ConfirmResponse
+        +confirm(String userId, String sessionId, UUID key, ConfirmRequest) ConfirmResponse
         -doConfirm(...) ConfirmOutcome
     }
     class PayloadDecryptor {
-        +decrypt(String payload, Class~T~) T
+        +decrypt(String sessionId, String userId, String payload, Class~T~) T
     }
     class ReplayGuard {
-        +check(String nonce, long ts)
+        +check(String sessionId, String nonce, long ts)
     }
     class AesGcmCipher {
         +encrypt(byte[] key, byte[] plaintext, byte[] aad) byte[]
         +decrypt(byte[] key, byte[] blob, byte[] aad) byte[]
     }
-    class PayloadKey {
-        +bytes() byte[]
+    class KeyWrapper {
+        +wrap(String sessionId, byte[] key) byte[]
+        +unwrap(String sessionId, byte[] wrapped) byte[]
     }
     class MockPaymentEngine {
         +evaluateInquiry(BillerService, String subscriber, Instant now) InquiryDecision
@@ -175,8 +178,9 @@ classDiagram
     ConfirmService --> PayloadDecryptor
     ConfirmService --> PendingResolver
     PayloadDecryptor --> AesGcmCipher
-    PayloadDecryptor --> PayloadKey
+    PayloadDecryptor --> KeyWrapper
     PayloadDecryptor --> ReplayGuard
+    KeyWrapper --> AesGcmCipher
     MockPaymentEngine --> FeeCalculator
     TransactionService --> PendingResolver
 ```
@@ -184,14 +188,18 @@ classDiagram
 ### 3.3 Service interfaces (signatures)
 
 ```java
-// payload
-public class PayloadKey { byte[] bytes(); }                              // FR-ENC-1, fail-fast at startup
+// session
+public class SessionService {
+    CreateSessionResponse create(String userId);                 // FR-SES-1..3
+    void revoke(String userId, String sessionId);                // FR-SES-5
+}
 public class PayloadDecryptor {
-    <T extends EncryptedPayload> T decrypt(String payloadB64, Class<T> type);  // FR-ENC-2..3
+    <T extends EncryptedPayload> T decrypt(String sessionId, String userId,
+                                           String payloadB64, Class<T> type); // FR-INQ-2, NFR-SEC-1..2
 }
 public class ReplayGuard {
     @Transactional(propagation = REQUIRES_NEW)
-    void check(String nonce, long ts);                           // NFR-SEC-2..3
+    void check(String sessionId, String nonce, long ts);         // NFR-SEC-2..3
 }
 
 // user
@@ -209,10 +217,11 @@ public class CatalogService {
 
 // payment
 public class InquiryService {
-    InquiryResponse inquire(String userId, InquiryRequest req);              // FR-INQ
+    InquiryResponse inquire(String userId, String sessionId, InquiryRequest req); // FR-INQ
 }
 public class ConfirmService {
-    ConfirmResponse confirm(String userId, UUID idempotencyKey, ConfirmRequest req);                          // FR-PAY
+    ConfirmResponse confirm(String userId, String sessionId, UUID idempotencyKey,
+                            ConfirmRequest req);                          // FR-PAY
 }
 
 // transaction
@@ -354,22 +363,13 @@ CREATE INDEX ix_txn_user_history ON transactions (user_id, created_at DESC, seq 
 CREATE INDEX ix_txn_pending_due  ON transactions (pending_until) WHERE status = 'PENDING';
 ```
 
-### 4.1.1 `V5__drop_sessions.sql` (ADR-011)
-
-Merged migrations are never edited, so V1 above still creates `sessions`; V5 removes it. After V5 there is no `sessions` table, and `inquiries` and `used_nonces` have no `session_id` column.
-
-```sql
-ALTER TABLE inquiries   DROP COLUMN session_id;
-ALTER TABLE used_nonces DROP COLUMN session_id;
-DROP TABLE sessions;
-```
-
 ### 4.2 Table notes
 
 | Table | Notes |
 |---|---|
 | `users` | Created only by the seed migration. `email` is unique case-insensitively. There is no password column (no login). |
 | `services` | `deleted_at` soft delete supports `deletedIds`. The trigger bumps `updated_at` on every update. |
+| `sessions` | The raw key is never stored. `wrapped_key` is sealed with `APP_MASTER_KEY`, with the session ID as AAD, so a wrapped key copied to another row does not decrypt. |
 | `used_nonces` | A PK violation means a replay. Purged every minute for rows older than 5 minutes. |
 | `inquiries` | Expiry is derived (`now > expires_at`) and never stored as a status. `rule` is decided once, at inquiry time. |
 | `transactions` | A snapshot of the inquiry amounts, so a receipt never changes. `seq` feeds both the ID and the reference. |
@@ -379,6 +379,7 @@ DROP TABLE sessions;
 | Job | Schedule | SQL |
 |---|---|---|
 | `NonceCleanupJob` | every 60 s | `DELETE FROM used_nonces WHERE created_at < now() - interval '5 minutes'` |
+| `SessionCleanupJob` | hourly | `DELETE FROM sessions WHERE expires_at < now() - interval '1 day'` (cascade clears nonces, inquiries keep `session_id = NULL`) |
 | `PendingResolver.sweep` | every 5 s | `UPDATE transactions SET status='SUCCESS', paid_at=pending_until WHERE status='PENDING' AND pending_until <= now()` |
 
 ---
@@ -399,7 +400,8 @@ public enum TransactionStatus { SUCCESS, FAILED, PENDING }
 |---|---|---|
 | `User` | `users` | `id`, `fullName`, `mobile` (`updatable = false`), `email`, `pinHash`, `memberSince`, `updatedAt` |
 | `BillerService` | `services` | all columns. `boolean isSlow() { return id.endsWith("_slow"); }` |
-| `UsedNonce` | `used_nonces` | `nonce`, `createdAt` |
+| `Session` | `sessions` | `boolean isExpired(Instant now)`, `boolean isRevoked()`, `boolean ownedBy(String userId)` |
+| `UsedNonce` | `used_nonces` | `nonce`, `sessionId`, `createdAt` |
 | `Inquiry` | `inquiries` | `@ManyToOne(fetch = LAZY) BillerService service`, `boolean isExpired(Instant now)`, `void registerWrongPin()` (increments and sets `INVALIDATED` at 3), `void markConfirmed()` |
 | `Transaction` | `transactions` | `@ManyToOne(fetch = LAZY) BillerService service`, `boolean resolveIfDue(Instant now)` (PENDING → SUCCESS, `paidAt = pendingUntil`) |
 
@@ -416,6 +418,7 @@ interface BillerServiceRepository extends JpaRepository<BillerService, String> {
     List<String> findDeletedIdsSince(Instant since);
     Optional<BillerService> findByIdAndDeletedAtIsNull(String id);
 }
+interface SessionRepository extends JpaRepository<Session, String> {}
 interface UsedNonceRepository extends JpaRepository<UsedNonce, String> {
     @Modifying @Query("delete from UsedNonce n where n.createdAt < :cutoff") int purgeBefore(Instant cutoff);
 }
@@ -443,9 +446,34 @@ interface TransactionRepository extends JpaRepository<Transaction, String> {
 
 Common request headers on every `/v1` call: `X-Request-Id: <uuid>`, `X-Client-Platform: ios|android`, `X-Client-Version: <text>`. Every error uses the envelope in SRS §4.3.
 
-### 6.1–6.2 (removed)
+### 6.1 `POST /v1/sessions` — create a crypto session
 
-`POST /v1/sessions` and `DELETE /v1/sessions/{sessionId}` were removed in contract v2.0.0 (ADR-011). Payloads are encrypted with the static shared key, so there is nothing to create or revoke. The numbering of the sections below is kept.
+| | |
+|---|---|
+| Headers | `X-User-Id` |
+| Body | none |
+| Success | `201 Created` |
+| Errors | `400 VALIDATION_ERROR` (X-User-Id), `404 USER_NOT_FOUND`, `429 RATE_LIMITED` |
+
+```json
+{
+  "sessionId": "ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60",
+  "sessionKey": "q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=",
+  "expiresAt": "2026-09-20T10:30:00Z"
+}
+```
+
+```java
+public record CreateSessionResponse(String sessionId, String sessionKey, Instant expiresAt) {}
+```
+
+### 6.2 `DELETE /v1/sessions/{sessionId}` — revoke
+
+| | |
+|---|---|
+| Headers | `X-User-Id` |
+| Success | `204 No Content` (idempotent: revoking an already revoked session also returns 204) |
+| Errors | `404 SESSION_NOT_FOUND` (unknown or foreign), `404 USER_NOT_FOUND` |
 
 ### 6.3 `GET /v1/profile`
 
@@ -543,9 +571,9 @@ public record SyncResponse(Instant syncedAt, List<ServiceItem> items, List<Strin
 
 | | |
 |---|---|
-| Headers | `X-User-Id` |
+| Headers | `X-User-Id`, `X-Session-Id` |
 | Success | `200` |
-| Errors | `400 VALIDATION_ERROR` (`serviceId`, `payload`, `subscriberNumber`, headers), `400 DECRYPTION_FAILED`, `404 USER_NOT_FOUND`, `404 SERVICE_NOT_FOUND`, `503 SERVICE_UNAVAILABLE`, `404 SUBSCRIBER_NOT_FOUND`, `409 BILL_ALREADY_PAID` |
+| Errors | `400 VALIDATION_ERROR` (`serviceId`, `payload`, `subscriberNumber`, headers), `400 DECRYPTION_FAILED`, `404 USER_NOT_FOUND`, `404 SESSION_NOT_FOUND`, `410 SESSION_EXPIRED`, `404 SERVICE_NOT_FOUND`, `503 SERVICE_UNAVAILABLE`, `404 SUBSCRIBER_NOT_FOUND`, `409 BILL_ALREADY_PAID` |
 
 Request and decrypted payload:
 
@@ -583,15 +611,15 @@ public record InquiryResponse(String inquiryId, String serviceId, String custome
                               String currency, Instant expiresAt) {}
 ```
 
-**Check order** (the first failing check wins): headers → body DTO → user → service exists → service active → decrypt (blob → tag → JSON → ts → nonce) → `subscriberNumber` matches `inputPattern` → mock rule.
+**Check order** (the first failing check wins): headers → body DTO → user → service exists → service active → decrypt (session → blob → tag → JSON → ts → nonce) → `subscriberNumber` matches `inputPattern` → mock rule.
 
 ### 6.8 `POST /v1/payments/confirm`
 
 | | |
 |---|---|
-| Headers | `X-User-Id`, `Idempotency-Key` (UUID, required) |
+| Headers | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` (UUID, required) |
 | Success | `200` (for `SUCCESS` and `PENDING`, first call and replays alike) |
-| Errors | `400 VALIDATION_ERROR` (`Idempotency-Key`, `inquiryId`, `payload`, `pin`), `400 DECRYPTION_FAILED`, `402 INSUFFICIENT_BALANCE`, `404 USER_NOT_FOUND`, `404 INQUIRY_NOT_FOUND`, `409 IDEMPOTENCY_CONFLICT`, `409 INQUIRY_ALREADY_CONFIRMED`, `410 INQUIRY_EXPIRED`, `410 INQUIRY_INVALIDATED`, `422 AMOUNT_OUT_OF_RANGE`, `429 RATE_LIMITED`, `503 SERVICE_UNAVAILABLE` |
+| Errors | `400 VALIDATION_ERROR` (`Idempotency-Key`, `inquiryId`, `payload`, `pin`), `400 DECRYPTION_FAILED`, `402 INSUFFICIENT_BALANCE`, `404 USER_NOT_FOUND`, `404 SESSION_NOT_FOUND`, `404 INQUIRY_NOT_FOUND`, `409 IDEMPOTENCY_CONFLICT`, `409 INQUIRY_ALREADY_CONFIRMED`, `410 SESSION_EXPIRED`, `410 INQUIRY_EXPIRED`, `410 INQUIRY_INVALIDATED`, `422 AMOUNT_OUT_OF_RANGE`, `429 RATE_LIMITED`, `503 SERVICE_UNAVAILABLE` |
 
 ```json
 { "inquiryId": "inq_8f21a0c4d9e7b312", "payload": "<base64(iv‖ct‖tag)>" }
@@ -691,6 +719,7 @@ public enum ErrorCode {
     DECRYPTION_FAILED(400, "The secure payload could not be read.", "تعذر قراءة البيانات المشفرة."),
     INSUFFICIENT_BALANCE(402, "Payment declined: insufficient balance.", "تم رفض الدفع: الرصيد غير كافٍ."),
     USER_NOT_FOUND(404, "User not found.", "المستخدم غير موجود."),
+    SESSION_NOT_FOUND(404, "Session not found.", "الجلسة غير موجودة."),
     SERVICE_NOT_FOUND(404, "Service not found.", "الخدمة غير موجودة."),
     SUBSCRIBER_NOT_FOUND(404, "No bill found for this number.", "لا توجد فاتورة لهذا الرقم."),
     INQUIRY_NOT_FOUND(404, "Inquiry not found.", "الاستعلام غير موجود."),
@@ -701,6 +730,7 @@ public enum ErrorCode {
     EMAIL_ALREADY_USED(409, "This email is already in use.", "البريد الإلكتروني مستخدم بالفعل."),
     IDEMPOTENCY_CONFLICT(409, "Idempotency key already used for another inquiry.", "مفتاح التكرار مستخدم لاستعلام آخر."),
     INQUIRY_ALREADY_CONFIRMED(409, "This inquiry has already been paid.", "تم دفع هذا الاستعلام بالفعل."),
+    SESSION_EXPIRED(410, "Your secure session has expired.", "انتهت صلاحية الجلسة الآمنة."),
     INQUIRY_EXPIRED(410, "This inquiry has expired.", "انتهت صلاحية الاستعلام."),
     INQUIRY_INVALIDATED(410, "Too many wrong PIN attempts. Start a new inquiry.", "محاولات رقم سري خاطئة كثيرة. ابدأ استعلامًا جديدًا."),
     AMOUNT_OUT_OF_RANGE(422, "The amount is outside the allowed range for this service.", "المبلغ خارج الحد المسموح لهذه الخدمة."),
@@ -772,6 +802,7 @@ return userLookupService.require(id)        // → USER_NOT_FOUND
 
 | Policy | Route | Limit | Key |
 |---|---|---|---|
+| `SESSIONS` | `POST /v1/sessions` | 5 / minute | `X-User-Id` |
 | `CONFIRM` | `POST /v1/payments/confirm` | 5 / minute | `X-User-Id` |
 
 ```java
@@ -788,7 +819,7 @@ The cache is a Caffeine cache (`expireAfterAccess 10 min`). Without an `X-User-I
 
 ```java
 configurePathMatch: addPathPrefix("/v1", HandlerTypePredicate.forBasePackage("com.momknpay"))
-addInterceptors:   RequiredHeadersInterceptor → "/v1/**"; RateLimitInterceptor → "/v1/payments/confirm"
+addInterceptors:   RequiredHeadersInterceptor → "/v1/**"; RateLimitInterceptor → "/v1/sessions", "/v1/payments/confirm"
 (CurrentUserArgumentResolver is registered by user.web.UserWebConfig, so common never depends on a feature package)
 ```
 
@@ -824,32 +855,43 @@ byte[] decrypt(byte[] key, byte[] blob, byte[] aad) {
 }
 ```
 
-Client payloads use **no AAD** (contract).
+Client payloads use **no AAD** (contract). `KeyWrapper` uses AAD = session ID.
 
-### 8.2 `PayloadKey`
+### 8.2 `KeyWrapper`
 
 ```java
-PayloadKey(AppProperties p)   // decodes APP_PAYLOAD_KEY; fails startup unless valid base64 of exactly 32 bytes
-byte[] bytes()                // a copy, so the caller can zero its buffer after use
+KeyWrapper(AppProperties p)  // decodes APP_MASTER_KEY; fails startup unless exactly 32 bytes
+byte[] wrap(String sessionId, byte[] key)       = cipher.encrypt(master, key, utf8(sessionId))
+byte[] unwrap(String sessionId, byte[] wrapped) = cipher.decrypt(master, wrapped, utf8(sessionId))
 ```
 
-One static key for every client (ADR-011). It is configured on the server and built into the apps, so it is never issued, stored in the database or returned by an endpoint.
+### 8.3 `SessionService.create`
 
-### 8.3 (removed)
-
-`SessionService` was removed with sessions.
+```
+user = userLookup.require(userId)
+key  = 32 bytes from SecureRandom
+id   = "ses_" + hex(16 random bytes)
+now  = time.now()
+sessionRepo.save(Session(id, userId, keyWrapper.wrap(id, key), now, now + APP_SESSION_TTL))
+response = (id, base64(key), expiresAt)
+Arrays.fill(key, 0)
+log.info("session.created sessionId={} userId={}", id, userId)     // never the key
+```
 
 ### 8.4 `PayloadDecryptor.decrypt`
 
 ```
-key  = payloadKey.bytes()
+session = sessionRepo.findById(sessionId)
+          .filter(s -> s.ownedBy(userId) && !s.isRevoked())      else SESSION_NOT_FOUND
+if session.isExpired(now)                                         → SESSION_EXPIRED
+key  = keyWrapper.unwrap(session.id, session.wrappedKey)
 try {
     blob  = Base64.getDecoder().decode(payloadB64)                // IllegalArgumentException → DECRYPTION_FAILED
     plain = cipher.decrypt(key, blob, null)                       // CryptoException → DECRYPTION_FAILED
     obj   = objectMapper.readValue(plain, type)                   // bad JSON → DECRYPTION_FAILED
-} finally { Arrays.fill(key, 0); Arrays.fill(plain, 0) }
+} finally { Arrays.fill(key, 0) }
 if obj.nonce !~ ^[0-9a-f]{32}$ or obj.ts == null                  → DECRYPTION_FAILED
-replayGuard.check(obj.nonce, obj.ts)
+replayGuard.check(session.id, obj.nonce, obj.ts)
 return obj
 ```
 
@@ -860,11 +902,11 @@ The plaintext bytes and the decoded object are never logged. `toString()` of `In
 ```
 nowSec = time.now().getEpochSecond()
 if abs(nowSec - ts) > APP_REPLAY_WINDOW (120)                     → DECRYPTION_FAILED
-try usedNonceRepo.saveAndFlush(UsedNonce(nonce, now))
+try usedNonceRepo.saveAndFlush(UsedNonce(nonce, sessionId, now))
 catch DataIntegrityViolationException                              → DECRYPTION_FAILED   // replay
 ```
 
-`REQUIRES_NEW` commits the nonce even if the surrounding business transaction later fails. A payload is therefore single-use no matter what the outcome was. With one key shared by every client, this check is what stops a captured payload from being sent again.
+`REQUIRES_NEW` commits the nonce even if the surrounding business transaction later fails. A payload is therefore single-use no matter what the outcome was.
 
 ---
 
@@ -938,11 +980,11 @@ Every seeded `inputPattern` requires at least 8 digits, so `substring(2, 7)` is 
 svc = serviceRepo.findByIdAndDeletedAtIsNull(req.serviceId)          else SERVICE_NOT_FOUND
 try {
     if !svc.isActive                                                  → SERVICE_UNAVAILABLE
-    p = decryptor.decrypt(req.payload, InquiryPayload.class)
+    p = decryptor.decrypt(sessionId, userId, req.payload, InquiryPayload.class)
     if p.subscriberNumber == null or !Pattern.matches(svc.inputPattern, p.subscriberNumber)
                                                                       → VALIDATION_ERROR("subscriberNumber")
     d   = engine.evaluateInquiry(svc, p.subscriberNumber, now)        // may throw 404 / 409
-    inq = Inquiry(id = "inq_" + hex(8 bytes), userId, svc, p.subscriberNumber,
+    inq = Inquiry(id = "inq_" + hex(8 bytes), userId, svc, sessionId, p.subscriberNumber,
                   d.customerName, d.billMonth, d.fees, d.rule, OPEN, 0, now, now + APP_INQUIRY_TTL)
     inquiryRepo.save(inq)                                              // @Transactional
     log.info("inquiry.created inquiryId={} service={} subscriber={} rule={}",
@@ -969,11 +1011,11 @@ record ConfirmOutcome(ConfirmResponse response, ErrorCode error, String field) {
 ```
 
 ```
-confirm(userId, key, req):
+confirm(userId, sessionId, key, req):
     slow = false                                          // decided inside the transaction, used after it
     try {
         try {
-            outcome = txTemplate.execute(s -> doConfirm(userId, key, req, slow))
+            outcome = txTemplate.execute(s -> doConfirm(userId, sessionId, key, req, slow))
         } catch (DataIntegrityViolationException e) {     // lost a race on ux_txn_idempotency
             outcome = txTemplate.execute(s ->
                 replay(txnRepo.findByUserIdAndIdempotencyKey(userId, key) else rethrow e, req.inquiryId, slow))
@@ -983,7 +1025,7 @@ confirm(userId, key, req):
         slowDelay.applyIf(slow)                           // _slow → +8 s on every path (replays too), no lock held
     }
 
-doConfirm(userId, key, req, slow):                        // inside ONE DB transaction
+doConfirm(userId, sessionId, key, req, slow):                        // inside ONE DB transaction
     // 1. fast replay path — before any decryption (HLD §8.4)
     existing = txnRepo.findByUserIdAndIdempotencyKey(userId, key)
     if existing: return replay(existing, req.inquiryId, slow)
@@ -997,7 +1039,7 @@ doConfirm(userId, key, req, slow):                        // inside ONE DB trans
     if inq.isExpired(now):                           return failed(INQUIRY_EXPIRED)
     if !inq.service.isActive:                        return failed(SERVICE_UNAVAILABLE)
 
-    p = decryptor.decrypt(req.payload, ConfirmPayload.class)                      // throws → rollback (nothing written)
+    p = decryptor.decrypt(sessionId, userId, req.payload, ConfirmPayload.class)   // throws → rollback (nothing written)
     if p.pin == null or !p.pin.matches("\\d{4}"):    throw VALIDATION_ERROR("pin")  // format error, no counter
     if !bcrypt.matches(p.pin, user.pinHash):
         inq.registerWrongPin()                                         // 3rd → INVALIDATED
@@ -1134,7 +1176,8 @@ management:
         include: health
 
 app:
-  payload-key: ${APP_PAYLOAD_KEY:}            # base64 of 32 bytes, shared with the apps
+  master-key: ${APP_MASTER_KEY}
+  session-ttl: ${APP_SESSION_TTL:PT30M}
   inquiry-ttl: ${APP_INQUIRY_TTL:PT5M}
   replay-window: ${APP_REPLAY_WINDOW:PT120S}
   nonce-retention: PT5M
@@ -1144,7 +1187,7 @@ app:
     per-minute: 5
 ```
 
-`AppProperties` is a `@ConfigurationProperties("app")` record with `@Validated` constraints (for example `@NotBlank payloadKey`).
+`AppProperties` is a `@ConfigurationProperties("app")` record with `@Validated` constraints (for example `@NotBlank masterKey`).
 
 ### 10.2 `.env.example`
 
@@ -1156,15 +1199,15 @@ DB_NAME=momknpay
 DB_USER=momknpay
 DB_PASSWORD=change-me
 
-# --- crypto --- the AES-256 key that encrypts payloads; the same value is built into the apps
-# generate once with: openssl rand -base64 32, then share it with the client tracks
-APP_PAYLOAD_KEY=
+# --- crypto --- generate with: openssl rand -base64 32
+APP_MASTER_KEY=
 
 # --- TLS --- see LLD §13.2
 TLS_KEYSTORE_PATH=/certs/keystore.p12
 TLS_KEYSTORE_PASSWORD=change-me
 
 # --- optional overrides ---
+# APP_SESSION_TTL=PT30M
 # APP_INQUIRY_TTL=PT5M
 # APP_SLOW_DELAY=PT8S
 # APP_PENDING_DELAY=PT10S
@@ -1244,7 +1287,7 @@ public class V3__SeedUsers extends BaseJavaMigration {
 
 ### 11.3 `V4__seed_history.sql` — history for `usr_01`
 
-Six closed inquiries (`status = CONFIRMED` or `OPEN`, already expired) and their transactions. IDs and references use `nextval('transaction_seq')`:
+Six closed inquiries (`status = CONFIRMED` or `OPEN`, `session_id = NULL`, already expired) and their transactions. IDs and references use `nextval('transaction_seq')`:
 
 | Service | Subscriber | amountDue | total | Status | createdAt |
 |---|---|---|---|---|---|
@@ -1282,7 +1325,7 @@ Six closed inquiries (`status = CONFIRMED` or `OPEN`, already expired) and their
 | U15 | `ConfirmServiceTest.largeBillRejected` | rule 6 → `AMOUNT_OUT_OF_RANGE`, no transaction | FR-PAY-8 |
 | U16 | `ConfirmServiceTest.declineRecordsFailedTransaction` | rule 7 → a FAILED transaction is saved, 402 | §6.1 |
 | U17 | `PendingResolverTest.flipsAfterDelay` | +9 s still PENDING; +10 s SUCCESS with `paidAt = pendingUntil` | FR-TXN-5 |
-| U18 | `StartupValidationTest` | startup fails without a payload key, with a non-base64 key or with one that is not 32 bytes | FR-ENC-1, NFR-SEC-4 |
+| U18 | `KeyWrapperTest.wrapUnwrapAndAadBinding` | unwrapping with a different session ID fails | NFR-SEC-4 |
 | U19 | `ReferenceGeneratorTest` | `MP-20260920-5521` | FR-PAY-9 |
 
 ### 12.2 Integration tests (`@SpringBootTest` + Testcontainers PostgreSQL + MockMvc)
@@ -1291,16 +1334,16 @@ Six closed inquiries (`status = CONFIRMED` or `OPEN`, already expired) and their
 |---|---|---|
 | I1 | `HeadersIT` | Each missing or invalid common header → 400 with the right `field`. `/docs` and `/actuator/health` work without headers. |
 | I2 | `ErrorEnvelopeIT` | Unknown route, wrong method, malformed JSON, unknown property and a forced 500 all return the envelope. |
-| I3 | `PayloadDecryptorIT` | Round-trip with the shared key; replayed payload, reused nonce, stale `ts`, tampered blob, another key and malformed plaintext → `DECRYPTION_FAILED`; the nonce stays consumed when the caller rolls back. |
+| I3 | `SessionIT` | Create → use → revoke → `SESSION_NOT_FOUND`. Clock past 30 min → `SESSION_EXPIRED`. Foreign user → 404. |
 | I4 | `ProfileIT` | GET, PATCH name/email, PATCH with `mobile` → 400 `field=mobile`, duplicate email → 409. |
 | I5 | `CatalogIT` | 24 services visible, inactive ones included, `sync` returns changed rows and `deletedIds`, bad `since` → 400. |
 | I6 | `PaymentFlowIT` | Full encrypted flow for digits 1, 6, 7, 8 and 9, 0. Receipt and history ordering. PENDING becomes SUCCESS after the clock advances. |
 | I7 | `ConcurrencyIT` | 10 parallel confirms with the same key → exactly 1 row, all responses carry the same `transactionId`. 2 keys on the same inquiry → 1 success and 1 `INQUIRY_ALREADY_CONFIRMED`. |
 | I8 | `RateLimitIT` | The sixth confirm within a minute → 429 with `Retry-After`. |
 | I9 | `SeedDataIT` | 3 users with working PINs, all 6 categories, ≥ 24 visible services, the `_slow` and inactive services present. |
-| I10 | `LogHygieneTest` | Runs I6 with a captured appender and asserts that no PIN (`1234`), payload key, `payload`, or full subscriber number (`1024750891`) appears in the logs. |
+| I10 | `LogHygieneTest` | Runs I6 with a captured appender and asserts that no PIN (`1234`), session key, `payload`, or full subscriber number (`1024750891`) appears in the logs. |
 
-A test helper `TestCrypto.encrypt(key, json)` mirrors exactly what the clients do, including a fresh nonce and the current `ts`.
+A test helper `TestCrypto.encrypt(sessionKey, json)` mirrors exactly what the clients do, including a fresh nonce and the current `ts`.
 
 ---
 
@@ -1379,7 +1422,7 @@ Both pins go in the README and the contract repository. `certs/` is git-ignored.
 ### 13.4 First run
 
 ```bash
-cp .env.example .env            # fill DB_PASSWORD, APP_PAYLOAD_KEY, TLS_KEYSTORE_PASSWORD
+cp .env.example .env            # fill DB_PASSWORD, APP_MASTER_KEY, TLS_KEYSTORE_PASSWORD
 # generate certs (13.3), add "127.0.0.1 api.momknpay.local" to the hosts file
 docker compose up --build
 # → https://api.momknpay.local/docs
@@ -1388,11 +1431,13 @@ docker compose up --build
 ### 13.5 Postman collection layout
 
 ```
-Momkn Pay v1   (contract v2.0.0; variables: baseUrl, payloadKey, userId)
-├── 00 Setup            how to trust certs/cert.pem and set payloadKey (= APP_PAYLOAD_KEY)
-├── 01 Profile          get · patch · patch mobile (400) · duplicate email (409)
-├── 02 Catalogue        services · sync · sync bad since
-├── 03 Inquiry rules    digit 0 · 1 · 6 · 7 · 9 · _slow · inactive · bad pattern · replayed payload
-├── 04 Confirm rules    success · replay same key · conflict key · decline · large · wrong PIN ×3 · pending
-└── 05 History          list · receipt · foreign receipt (404) · pending receipt · bad size
+Momkn Pay v1
+├── 00 Setup            (pre-request script: X-Request-Id = {{$guid}}, platform/version vars,
+│                        encrypt helper using CryptoJS AES-GCM polyfill or a small Node helper)
+├── 01 Sessions         create · revoke
+├── 02 Profile          get · patch · patch mobile (400) · duplicate email (409)
+├── 03 Catalogue        services · sync · sync bad since
+├── 04 Inquiry rules    digit 0 · 1 · 6 · 7 · 8 · 9 · _slow · inactive · bad pattern · replayed nonce
+├── 05 Confirm rules    success · replay same key · conflict key · wrong PIN ×3 · expired · decline · pending
+└── 06 History          list · receipt · foreign receipt (404)
 ```

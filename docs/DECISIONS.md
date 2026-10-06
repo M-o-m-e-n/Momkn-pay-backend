@@ -14,13 +14,14 @@ The first decision (ADR-001) is the root. Every other decision here follows from
 ```mermaid
 flowchart TD
     A[ADR-001<br/>No auth module] --> B[ADR-002<br/>User identified by X-User-Id]
-    A --> C[ADR-003<br/>Encryption key from POST /sessions<br/>superseded]
-    C --> K[ADR-011<br/>No sessions, static shared key]
+    A --> C[ADR-003<br/>Encryption key from POST /sessions]
     A --> D[ADR-004<br/>Users only from seed data]
     A --> E[ADR-005<br/>Passwords removed, PIN kept]
-    A --> F[ADR-006<br/>Rate limit on confirm<br/>amended by ADR-011]
+    A --> F[ADR-006<br/>Rate limit moves to /sessions]
     A --> G[ADR-007<br/>More specific error codes]
     C --> H[ADR-008<br/>Idempotency check before decryption]
+    C -.-> K[ADR-011<br/>No sessions, static shared key<br/>superseded]
+    K -.-> L[ADR-012<br/>Sessions restored]
     I[ADR-009<br/>Spring Boot + Java 25]
 ```
 
@@ -30,15 +31,16 @@ flowchart TD
 |---|---|---|
 | [001](#adr-001--build-the-backend-without-an-authentication-module) | Build the backend without an authentication module | Accepted |
 | [002](#adr-002--identify-the-user-with-the-x-user-id-header) | Identify the user with the `X-User-Id` header | Accepted |
-| [003](#adr-003--issue-the-encryption-key-from-post-sessions) | Issue the encryption key from `POST /sessions` | **Superseded by ADR-011** |
+| [003](#adr-003--issue-the-encryption-key-from-post-sessions) | Issue the encryption key from `POST /sessions` | Accepted (reinstated by ADR-012) |
 | [004](#adr-004--users-come-only-from-seed-data) | Users come only from seed data | Accepted |
 | [005](#adr-005--remove-passwords-keep-the-pin) | Remove passwords, keep the PIN | Accepted |
-| [006](#adr-006--move-the-login-rate-limit-to-post-sessions) | Move the login rate limit to `POST /sessions` | Amended by ADR-011 |
-| [007](#adr-007--add-specific-error-codes-for-the-new-failure-paths) | Add specific error codes for the new failure paths | Amended by ADR-011 |
+| [006](#adr-006--move-the-login-rate-limit-to-post-sessions) | Move the login rate limit to `POST /sessions` | Accepted |
+| [007](#adr-007--add-specific-error-codes-for-the-new-failure-paths) | Add specific error codes for the new failure paths | Accepted |
 | [008](#adr-008--check-idempotency-before-decrypting) | Check idempotency before decrypting | Accepted |
 | [009](#adr-009--spring-boot-and-java-25) | Spring Boot and Java 25 | Accepted |
 | [010](#adr-010--confirm-gets-a-500-ms-latency-budget-bcrypt-stays-at-cost-12) | Confirm gets a 500 ms latency budget; bcrypt stays at cost 12 | Accepted |
-| [011](#adr-011--remove-sessions-encrypt-payloads-with-one-static-shared-key) | Remove sessions; encrypt payloads with one static shared key | Accepted |
+| [011](#adr-011--remove-sessions-encrypt-payloads-with-one-static-shared-key) | Remove sessions; encrypt payloads with one static shared key | **Superseded by ADR-012** |
+| [012](#adr-012--bring-sessions-back-the-payload-key-is-issued-per-session-again) | Bring sessions back: the payload key is issued per session again | Accepted |
 
 ---
 
@@ -70,7 +72,7 @@ The backend has **no authentication module**. Every endpoint is public. There is
 - ✅ About a week of backend time is freed for payments, encryption, idempotency and tests.
 - ✅ Clients integrate against real endpoints earlier.
 - ❌ **Anyone who can reach the API can act as any user.** This is accepted only because this is a teaching environment with simulated money. It is stated in SRS §8 (L-1), the README and the final review.
-- ❌ The client tracks lose the brief's secure token storage and 401-refresh learning goals. Secure storage still applies to the payload key (since ADR-011 a static key built into the app, no longer a session key).
+- ❌ The client tracks lose the brief's secure token storage and 401-refresh learning goals. Secure storage still applies to the session key (memory only).
 - ➡️ Leads to ADR-002 to ADR-008.
 
 ---
@@ -99,15 +101,13 @@ User-scoped endpoints require an `X-User-Id` header (for example `usr_01`), and 
 ### Consequences
 - ✅ Contract paths unchanged, and one replaceable place to add auth later.
 - ❌ The header can be forged (see ADR-001).
-- The server still checks that the user exists (`USER_NOT_FOUND`) and that inquiries and transactions belong to that user. A caller cannot mix another user's data into its own requests by mistake.
+- The server still checks that the user exists (`USER_NOT_FOUND`) and that sessions, inquiries and transactions belong to that user. A caller cannot mix another user's data into its own requests by mistake.
 
 ---
 
 ## ADR-003 — Issue the encryption key from `POST /sessions`
 
-**Status:** Superseded by [ADR-011](#adr-011--remove-sessions-encrypt-payloads-with-one-static-shared-key) on 2026-10-01 · **Affected:** the former FR-SES-1…6
-
-> Kept for history. `POST /sessions`, `X-Session-Id` and the wrapped per-session keys described below no longer exist.
+**Status:** Accepted — superseded by ADR-011 on 2026-10-01, reinstated by ADR-012 on 2026-10-06 · **Affects:** FR-SES-1…6, HLD §8.1, §10, LLD §8
 
 ### Context
 In the brief, the AES-256 `sessionKey` is returned by **login** and used to encrypt the two sensitive fields: the subscriber number on inquiry and the PIN on confirm. With login removed, nothing hands out that key.
@@ -183,9 +183,7 @@ No password column, and no `/profile/change-password` endpoint. The PIN stays, s
 
 ## ADR-006 — Move the login rate limit to `POST /sessions`
 
-**Status:** Amended by ADR-011 on 2026-10-01 · **Affects:** FR-PAY-11, LLD §7.6
-
-> `POST /sessions` was removed by ADR-011, so only `POST /payments/confirm` is rate-limited now. The reasoning about the confirm limit below still holds.
+**Status:** Accepted · **Affects:** FR-SES-6, FR-PAY-11, LLD §7.6
 
 ### Context
 The brief rate-limits `/auth/login` and `/payments/confirm` to 5 attempts per minute per user. Login no longer exists.
@@ -205,9 +203,7 @@ Rate-limit `POST /sessions` and `POST /payments/confirm` to 5 per minute per `X-
 
 ## ADR-007 — Add specific error codes for the new failure paths
 
-**Status:** Amended by ADR-011 on 2026-10-01 · **Affects:** SRS §4.4, LLD §7.1
-
-> `SESSION_NOT_FOUND` and `SESSION_EXPIRED` were removed with sessions (ADR-011). The other codes and the reasoning below still hold; the current list is in SRS §4.4.
+**Status:** Accepted · **Affects:** SRS §4.4, LLD §7.1
 
 ### Context
 Removing auth deletes `INVALID_CREDENTIALS`, `TOKEN_EXPIRED` and `MOBILE_ALREADY_USED`. Sessions, header-based identity and stricter confirm rules create new failure paths. The brief requires clients to switch on the error `code`, never on the message.
@@ -230,13 +226,13 @@ Remove the three auth-only codes. Add one code per new failure path, among them 
 **Status:** Accepted · **Affects:** FR-PAY-2, HLD §8.4, LLD §9.4
 
 ### Context
-Each encrypted payload carries a single-use nonce, and the server rejects a nonce it has seen before (originally ADR-003, kept by ADR-011). A client that times out on confirm retries with the **same bytes**, so the same nonce and the same `Idempotency-Key`.
+Each encrypted payload carries a single-use nonce, and the server rejects a nonce it has seen before (ADR-003). A client that times out on confirm retries with the **same bytes**, so the same nonce and the same `Idempotency-Key`.
 
 ### Decision
 On `POST /payments/confirm`, the server first looks up the transaction by (`X-User-Id`, `Idempotency-Key`). If one exists, it returns it and never decrypts the payload.
 
 ### Cause
-If the server decrypted first, the replay check would reject the genuine retry as an attack, and the user would never get their receipt, even though the payment went through. This conflict exists because payloads are encrypted and replay-protected (ADR-003, then ADR-011).
+If the server decrypted first, the replay check would reject the genuine retry as an attack, and the user would never get their receipt, even though the payment went through. This conflict only exists because of the session-key encryption kept in ADR-003.
 
 ### Consequences
 - ✅ A retry gets the original transaction, and a replayed payload still cannot create a second payment.
@@ -291,11 +287,11 @@ Keep bcrypt at cost 12. Give `POST /payments/confirm` its own p95 budget of **50
 - ❌ Confirm is the slowest non-`_slow` endpoint; CPU per confirm is ~230 ms, which also bounds throughput per core (fine at 5 confirms/min/user).
 - `scripts/perf-smoke.js` checks confirm against 500 ms and everything else against 300 ms.
 
----
-
 ## ADR-011 — Remove sessions; encrypt payloads with one static shared key
 
-**Status:** Accepted · **Date:** 2026-10-01 · **Supersedes:** ADR-003 · **Amends:** ADR-006, ADR-007 · **Affects:** contract v2.0.0, SRS §3.2 (FR-ENC), HLD §8.1 and §10, LLD §4.1.1 and §8
+**Status:** Superseded by [ADR-012](#adr-012--bring-sessions-back-the-payload-key-is-issued-per-session-again) on 2026-10-06 · **Date:** 2026-10-01 · **Supersedes:** ADR-003 · **Amends:** ADR-006, ADR-007 · **Affects:** contract v2.0.0, SRS §3.2 (FR-ENC), HLD §8.1 and §10, LLD §4.1.1 and §8
+
+> Kept for history. Contract v2.0.0 ran without sessions and with one static key from `APP_PAYLOAD_KEY`; v3.0.0 restored `POST /sessions`.
 
 ### Context
 ADR-003 kept the brief's per-login `sessionKey` by adding `POST /sessions`: a client asked for a 30-minute AES key, sent its id in `X-Session-Id`, and the server stored the key wrapped with a master key. It worked, but it was machinery around something that protects nothing here: anyone could ask for a session for any user, because there is no authentication (ADR-001).
@@ -334,6 +330,43 @@ What follows from that:
 
 ---
 
+## ADR-012 — Bring sessions back: the payload key is issued per session again
+
+**Status:** Accepted · **Date:** 2026-10-06 · **Supersedes:** ADR-011 · **Reinstates:** ADR-003, and ADR-006 and ADR-007 as first written · **Affects:** contract v3.0.0, SRS FR-SES-1…6, HLD §8.1 and §10, LLD §4.1 and §8
+
+### Context
+ADR-011 removed sessions and encrypted payloads with one static key that was also built into both apps. That key is the same for every user and never expires, and it can be read out of an app build. The brief asks for something else: a `sessionKey` that is handed out when the user starts, held in memory only, and dead when the user leaves.
+
+### Decision
+Restore the session design of contract v1.0.0 exactly (ADR-003):
+
+- `POST /v1/sessions` (with `X-User-Id`) returns `{ sessionId, sessionKey, expiresAt }`; the key is 32 random bytes and lives 30 minutes. `DELETE /v1/sessions/{sessionId}` revokes it.
+- Inquiry and confirm require the `X-Session-Id` header again and are decrypted with that session's key.
+- The server stores session keys only wrapped with `APP_MASTER_KEY`. `APP_PAYLOAD_KEY` no longer exists.
+- `SESSION_NOT_FOUND` and `SESSION_EXPIRED` are back (22 error codes), and `POST /sessions` is rate-limited again.
+- The schema comes back with a new migration, `V6__restore_sessions.sql`. V5 is not edited.
+
+The contract moves to **v3.0.0**, a second breaking change.
+
+### Cause
+- A key per session limits a leak to one user for at most 30 minutes; the static key exposed every payload of every user until the backend and both apps were rebuilt.
+- Nothing secret is compiled into the apps any more.
+- The client tracks practise what the brief wants them to practise: keeping a key in memory only, and handling its expiry.
+
+### Alternatives considered
+| Alternative | Why it was rejected |
+|---|---|
+| Keep the static key (ADR-011) | Simpler, but one leaked or extracted key breaks every payload, and it drops a learning goal of the brief. |
+| A new key-exchange design (for example ECDH per app start) | More than the brief asks for, and a third design for the client tracks to learn. Restoring v1.0.0 reuses code and tests that already existed. |
+
+### Consequences
+- ✅ The encryption matches the brief again, apart from the key coming from `POST /sessions` instead of login.
+- ✅ The v1.0.0 code, tests and Postman requests were restored from git history rather than rewritten.
+- ❌ **Breaking contract change** for the second time: both client tracks must call `POST /sessions`, send `X-Session-Id`, and drop the built-in key.
+- ❌ There is still no authentication (ADR-001), so anyone can request a session for any user. The key protects payloads in transit and in logs, not against a malicious caller (SRS §8, L-2).
+
+---
+
 ## Revisiting these decisions
 
 Revisit ADR-001 if any of the following becomes true:
@@ -341,4 +374,4 @@ Revisit ADR-001 if any of the following becomes true:
 - the backend track finishes the definition of done early (see MILESTONES stretch goal X-2: add JWT behind `CurrentUserArgumentResolver`);
 - a mentor or reviewer requires the brief's F1/F2 features for grading.
 
-When auth is added, ADR-002 and ADR-006 are superseded, ADR-011 should be reopened (the key can come from the login response again, as the brief describes), and ADR-004 and ADR-005 should be reopened.
+When auth is added, ADR-002 and ADR-006 are superseded, ADR-003 can move the key back into the login response, and ADR-004 and ADR-005 should be reopened.
