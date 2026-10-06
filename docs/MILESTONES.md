@@ -28,7 +28,7 @@ gantt
     section M0 Contract
     Bootstrap + OpenAPI draft      :m0, 2026-10-05, 2d
     section M1 Foundations
-    Platform, crypto, payloads     :m1, after m0, 3d
+    Platform, crypto, sessions     :m1, after m0, 3d
     section M2 Catalogue & profile
     Services, sync, profile        :m2, after m1, 5d
     section M3 Payments
@@ -40,7 +40,7 @@ gantt
 | Milestone | Days | Theme | Demo (gate) |
 |---|---|---|---|
 | [M0](#m0--bootstrap-and-contract-freeze-days-12) | 1–2 | Bootstrap and contract freeze | OpenAPI 3.1 published. Clients run a mock server from it. |
-| [M1](#m1--platform-foundations-days-35) | 3–5 | Platform, crypto, encrypted payloads | `docker compose up` over HTTPS. An encrypted payload decrypts. Pinning rejects a proxy. |
+| [M1](#m1--platform-foundations-days-35) | 3–5 | Platform, crypto, sessions | `docker compose up` over HTTPS. Create a session. Pinning rejects a proxy. |
 | [M2](#m2--catalogue-and-profile-days-610) | 6–10 | Catalogue, sync, profile | Both apps load the catalogue, go offline and still search it. Profile edit works. |
 | [M3](#m3--payment-flow-days-1115) | 11–15 | Inquiry, confirm, history | A full encrypted payment, then every mock rule on purpose. |
 | [M4](#m4--hardening-and-release-days-1620) | 16–20 | Tests, audit, docs, release | Clean-machine `docker compose up`, `v1.0` tag, final demo. |
@@ -52,7 +52,8 @@ gantt
 - [ ] [M2 — Catalogue and profile](#m2--catalogue-and-profile-days-610) (6 slices)
 - [ ] [M3 — Payment flow](#m3--payment-flow-days-1115) (9 slices)
 - [ ] [M4 — Hardening and release](#m4--hardening-and-release-days-1620) (8 slices)
-- [ ] [M5 — Remove sessions](#m5--remove-sessions-after-v10) (4 slices, added after v1.0)
+- [ ] [M5 — Remove sessions](#m5--remove-sessions-after-v10) (4 slices, added after v1.0; **reversed by M6**)
+- [ ] [M6 — Restore sessions](#m6--restore-sessions-after-v20) (4 slices, added after v2.0)
 
 ### Critical path
 
@@ -116,10 +117,8 @@ flowchart LR
 
 - [ ] **M1 complete** (all slices done and the exit demo passed) *(all slices merged; the proxy-rejection part of the demo is on the client tracks)*
 
-**Goal:** everything that later features rely on: database, errors, headers, TLS, Docker, crypto, encrypted payloads.
-**Exit demo:** `docker compose up` → `https://api.momknpay.local/docs` loads. An encrypted inquiry payload is decrypted with the shared key. A client behind mitmproxy fails to connect because of pinning.
-
-> **History:** M1 originally delivered sessions (M1-S8, and the session parts of S7, S9 and S10). They were removed in [M5](#m5--remove-sessions-after-v10) (ADR-011); the ticked task lines below record what was built at the time, not current behaviour.
+**Goal:** everything that later features rely on: database, errors, headers, TLS, Docker, crypto, sessions.
+**Exit demo:** `docker compose up` → `https://api.momknpay.local/docs` loads. `POST /sessions` returns a key. A client behind mitmproxy fails to connect because of pinning.
 
 - [x] **M1-S1 · Database schema**
   - [x] `V1__schema.sql` exactly as in LLD §4.1 (tables, checks, unique and partial indexes, `transaction_seq`, `updated_at` trigger).
@@ -319,6 +318,8 @@ flowchart LR
 
 - [ ] **M5 complete** (all slices done; both client tracks have moved to contract v2.0.0)
 
+> **Reversed by [M6](#m6--restore-sessions-after-v20)** (ADR-012). The ticked lines below record what was done for v2.0.0, not current behaviour; M5-S4 was never rolled out and is no longer needed.
+
 **Goal:** the application has no sessions at all (ADR-011). Payloads stay AES-256-GCM-encrypted, with one static shared key.
 **Exit demo:** a payment from both apps with no session call, using the shared key; `POST /v1/sessions` returns 404.
 
@@ -347,6 +348,39 @@ flowchart LR
   - [ ] Tell both client tracks about contract v2.0.0 and get their sign-off.
   - [ ] Give them the shared payload key privately (not through git).
   - [ ] **Done when:** both apps pay without a session call.
+
+---
+
+## M6 — Restore sessions (after v2.0)
+
+- [ ] **M6 complete** (all slices done; both client tracks have moved to contract v3.0.0)
+
+**Goal:** the payload key is dynamic again: issued per session by `POST /v1/sessions`, valid 30 minutes, revoked on logout (ADR-012), exactly as in v1.0.
+**Exit demo:** both apps create a session on start, pay with its key, and get `SESSION_EXPIRED` after revoking it.
+
+- [x] **M6-S1 · Sessions back in the API and the code**
+  - [x] Contract v3.0.0: `POST`/`DELETE /sessions`, `X-Session-Id`, `SESSION_NOT_FOUND`, `SESSION_EXPIRED`; changelog row.
+  - [x] Session entity, service, controller, cleanup job, key wrapping and `APP_MASTER_KEY` restored from v1.0; `PayloadKey` and `APP_PAYLOAD_KEY` removed; package `payload` → `session`.
+  - [x] `V6__restore_sessions.sql` (V5 untouched).
+  - [x] Tests restored (`SessionIT`, `KeyWrapperTest`, session cases in the payment tests); the later review fixes are kept.
+  - [x] **Done when:** `./mvnw clean verify` is green, `OpenApiContractIT` matches v3.0.0, and an existing v2.0.0 database upgrades in place. *(88 unit + 110 IT)*
+  - Refs: ADR-012, ADR-003, SRS FR-SES-1…6, LLD §4.1 and §8
+
+- [x] **M6-S2 · Postman and scripts**
+  - [x] Collection with the session requests (folders 01–06, 38 requests), keeping `https://localhost/v1` and certificate verification.
+  - [x] `perf-smoke.js` with sessions.
+  - [x] **Done when:** Newman passes with certificate verification on, and the performance budgets hold. *(38/38; confirm p95 236 ms)*
+  - Refs: NFR-DOC-3, NFR-PER-1
+
+- [x] **M6-S3 · Documents and version 3.0.0**
+  - [x] ADR-012 (supersedes ADR-011, reinstates ADR-003); SRS, HLD, LLD, coding standards, demo guide, README, CLAUDE.md.
+  - [x] Version 3.0.0 and CHANGELOG with the client migration note.
+  - [x] **Done when:** no living document describes the static shared key as current behaviour.
+  - Refs: NFR-DOC-2, NFR-DOC-4
+
+- [ ] **M6-S4 · Roll out to the client tracks** *(manual)*
+  - [ ] Tell both client tracks about contract v3.0.0 and get their sign-off.
+  - [ ] **Done when:** both apps pay with a session key and hold no built-in key.
 
 ---
 

@@ -84,3 +84,17 @@ git push origin main --follow-tags
 | Contract `docs/openapi.yaml` v2.0.0 matches the code and lints clean | ✅ |
 
 Still manual: telling both client tracks about the breaking change, giving them the shared key, and tagging `v2.0`.
+
+## 5. Version 3.0.0 — sessions restored (M6)
+
+Version 2.0.0 (section 4) is superseded: `APP_PAYLOAD_KEY` and the shared key are gone again, and the configuration is `APP_MASTER_KEY` as in v1.0.
+
+| Check | Result |
+|---|---|
+| `./mvnw clean verify` | ✅ 88 unit + 110 integration tests, coverage gate met |
+| Upgrade in place: migration V6 on an existing v2.0.0 database with data | ✅ applied, data kept |
+| Newman with certificate verification on | ✅ 38/38 assertions |
+| Performance smoke test | ✅ within budget (confirm p95 236 ms of 500) |
+| Contract `docs/openapi.yaml` v3.0.0 matches the code (`OpenApiContractIT`) | ✅ |
+
+Still manual: telling both client tracks about the breaking change and tagging `v3.0`.
