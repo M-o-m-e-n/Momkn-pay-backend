@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.common.web.Headers;
+import com.momknpay.session.service.SessionService;
 import com.momknpay.support.Payloads;
 import com.momknpay.support.PaymentClient;
 import java.time.LocalDate;
@@ -38,13 +39,14 @@ import org.springframework.test.web.servlet.ResultActions;
 class ConfirmIT {
 
     @Autowired private MockMvc mvc;
+    @Autowired private SessionService sessionService;
     @Autowired private JdbcTemplate jdbc;
 
     private PaymentClient mina;
 
     @BeforeEach
-    void newClient() {
-        mina = new PaymentClient(mvc, "usr_01");
+    void openSession() {
+        mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
     }
 
     @Test
@@ -84,7 +86,7 @@ class ConfirmIT {
     void retryWithTheSameBytesReturnsTheSameTransaction() throws Exception {
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750891");
         UUID key = UUID.randomUUID();
-        String payload = Payloads.confirm("1234");
+        String payload = Payloads.confirm(mina.sessionKey(), "1234");
 
         String first = transactionId(mina.confirmWithPayload(inquiryId, key, payload));
         String retry =
@@ -133,6 +135,7 @@ class ConfirmIT {
         mvc.perform(
                         withClientHeaders(post("/v1/payments/confirm"))
                                 .header(Headers.USER_ID, "usr_01")
+                                .header(Headers.SESSION_ID, "ses_x")
                                 .header(Headers.IDEMPOTENCY_KEY, "not-a-uuid")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"inquiryId\":\"" + inquiryId + "\",\"payload\":\"x\"}"))
@@ -143,7 +146,7 @@ class ConfirmIT {
     @Test
     void unknownOrForeignInquiryIsNotFound() throws Exception {
         String minasInquiry = mina.openInquiry("svc_elec_cairo", "1024750891");
-        PaymentClient sara = new PaymentClient(mvc, "usr_02");
+        PaymentClient sara = new PaymentClient(mvc, "usr_02", sessionService.create("usr_02"));
 
         mina.confirm("inq_0000000000000000", UUID.randomUUID(), "1234")
                 .andExpect(status().isNotFound())

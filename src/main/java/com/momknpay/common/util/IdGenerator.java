@@ -16,6 +16,11 @@ public class IdGenerator {
         this.random = random;
     }
 
+    /** {@code ses_} + 32 hex characters (128 random bits). */
+    public String sessionId() {
+        return "ses_" + randomHex(16);
+    }
+
     /** {@code inq_} + 16 hex characters (64 random bits). */
     public String inquiryId() {
         return "inq_" + randomHex(8);

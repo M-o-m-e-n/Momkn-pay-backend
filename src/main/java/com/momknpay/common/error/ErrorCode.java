@@ -10,6 +10,7 @@ public enum ErrorCode {
     INSUFFICIENT_BALANCE(
             402, "Payment declined: insufficient balance.", "تم رفض الدفع: الرصيد غير كافٍ."),
     USER_NOT_FOUND(404, "User not found.", "المستخدم غير موجود."),
+    SESSION_NOT_FOUND(404, "Session not found.", "الجلسة غير موجودة."),
     SERVICE_NOT_FOUND(404, "Service not found.", "الخدمة غير موجودة."),
     SUBSCRIBER_NOT_FOUND(404, "No bill found for this number.", "لا توجد فاتورة لهذا الرقم."),
     INQUIRY_NOT_FOUND(404, "Inquiry not found.", "الاستعلام غير موجود."),
@@ -24,6 +25,7 @@ public enum ErrorCode {
             "مفتاح التكرار مستخدم لاستعلام آخر."),
     INQUIRY_ALREADY_CONFIRMED(
             409, "This inquiry has already been paid.", "تم دفع هذا الاستعلام بالفعل."),
+    SESSION_EXPIRED(410, "Your secure session has expired.", "انتهت صلاحية الجلسة الآمنة."),
     INQUIRY_EXPIRED(410, "This inquiry has expired.", "انتهت صلاحية الاستعلام."),
     INQUIRY_INVALIDATED(
             410,

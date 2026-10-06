@@ -1,7 +1,7 @@
 package com.momknpay.common.ratelimit;
 
 import static com.momknpay.support.ApiRequests.withClientHeaders;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,15 +19,41 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-/** 5 attempts per minute per user on POST /v1/payments/confirm (FR-PAY-11, NFR-SEC-9). */
+/** 5 attempts per minute per user on POST /v1/sessions and /v1/payments/confirm (NFR-SEC-9). */
 @SpringBootTest(properties = "app.rate-limit.per-minute=5") // own context, real limit
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class RateLimitIT {
 
-    private static final String BODY = "{\"inquiryId\":\"inq_none\",\"payload\":\"AAAA\"}";
-
     @Autowired private MockMvc mvc;
+
+    @Test
+    void sixthSessionWithinAMinuteIsRateLimitedWithRetryAfter() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            createSession("usr_03").andExpect(status().isCreated());
+        }
+
+        createSession("usr_03")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists(Headers.RETRY_AFTER))
+                .andExpect(jsonPath("$.error.code").value("RATE_LIMITED"));
+
+        createSession("usr_02").andExpect(status().isCreated()); // other users are unaffected
+        mvc.perform(
+                        withClientHeaders(delete("/v1/sessions/ses_unknown"))
+                                .header(Headers.USER_ID, "usr_03"))
+                .andExpect(status().isNotFound()); // revoke is not rate-limited
+    }
+
+    @Test
+    void requestsWithBadHeadersDoNotConsumeTokens() throws Exception {
+        for (int i = 0; i < 10; i++) {
+            mvc.perform(post("/v1/sessions").header(Headers.USER_ID, "usr_01"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        createSession("usr_01").andExpect(status().isCreated());
+    }
 
     @Test
     void sixthConfirmWithinAMinuteIsRateLimitedWhateverItsOutcome() throws Exception {
@@ -39,33 +65,20 @@ class RateLimitIT {
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists(Headers.RETRY_AFTER))
                 .andExpect(jsonPath("$.error.code").value("RATE_LIMITED"));
-
-        confirm("usr_03").andExpect(status().isNotFound()); // other users are unaffected
-        mvc.perform(withClientHeaders(get("/v1/profile")).header(Headers.USER_ID, "usr_02"))
-                .andExpect(status().isOk()); // other endpoints are not limited
-    }
-
-    @Test
-    void requestsWithBadHeadersDoNotConsumeTokens() throws Exception {
-        for (int i = 0; i < 10; i++) {
-            mvc.perform(
-                            post("/v1/payments/confirm") // no client headers
-                                    .header(Headers.USER_ID, "usr_01")
-                                    .header(Headers.IDEMPOTENCY_KEY, UUID.randomUUID().toString())
-                                    .contentType(MediaType.APPLICATION_JSON)
-                                    .content(BODY))
-                    .andExpect(status().isBadRequest());
-        }
-
-        confirm("usr_01").andExpect(status().isNotFound()); // still has all its attempts
+        createSession("usr_02").andExpect(status().isCreated()); // separate bucket per endpoint
     }
 
     private ResultActions confirm(String userId) throws Exception {
         return mvc.perform(
                 withClientHeaders(post("/v1/payments/confirm"))
                         .header(Headers.USER_ID, userId)
+                        .header(Headers.SESSION_ID, "ses_none")
                         .header(Headers.IDEMPOTENCY_KEY, UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(BODY));
+                        .content("{\"inquiryId\":\"inq_none\",\"payload\":\"AAAA\"}"));
+    }
+
+    private ResultActions createSession(String userId) throws Exception {
+        return mvc.perform(withClientHeaders(post("/v1/sessions")).header(Headers.USER_ID, userId));
     }
 }

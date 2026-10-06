@@ -7,9 +7,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.common.web.Headers;
+import com.momknpay.session.web.dto.CreateSessionResponse;
 import com.momknpay.support.Payloads;
 import com.momknpay.support.PaymentClient;
-import com.momknpay.support.TestCrypto;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -26,9 +27,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * I10: runs every sensitive path — inquiry, confirm (right and wrong PIN), replay and malformed
- * input — and asserts that no secret reaches the logs: not the shared payload key, a payload, a PIN
- * or a full subscriber number (NFR-SEC-6, CODING_STANDARDS §10.3).
+ * I10: runs every sensitive path — session, inquiry, confirm (right and wrong PIN), replay,
+ * malformed input, receipt — and asserts that no secret reaches the logs (NFR-SEC-6,
+ * CODING_STANDARDS §10.3).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -44,11 +45,26 @@ class LogHygieneIT {
     @Test
     void noSecretEverReachesTheLogs(CapturedOutput output) throws Exception {
         List<String> secrets = new ArrayList<>();
-        secrets.add(TestCrypto.TEST_PAYLOAD_KEY); // the static key must never be printed
-        PaymentClient omar = new PaymentClient(mvc, "usr_03");
+
+        // session over HTTP: the key is in the response body only
+        String sessionBody =
+                mvc.perform(
+                                withClientHeaders(post("/v1/sessions"))
+                                        .header(Headers.USER_ID, "usr_03"))
+                        .andExpect(status().isCreated())
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString();
+        CreateSessionResponse session =
+                new CreateSessionResponse(
+                        JsonPath.read(sessionBody, "$.sessionId"),
+                        JsonPath.read(sessionBody, "$.sessionKey"),
+                        Instant.parse(JsonPath.read(sessionBody, "$.expiresAt")));
+        secrets.add(session.sessionKey());
+        PaymentClient omar = new PaymentClient(mvc, "usr_03", session);
 
         // inquiry: the subscriber number travels encrypted and is logged masked only
-        String inquiryPayload = Payloads.inquiry(SUBSCRIBER);
+        String inquiryPayload = Payloads.inquiry(session.sessionKey(), SUBSCRIBER);
         secrets.add(inquiryPayload);
         String inquiryId =
                 JsonPath.read(
@@ -62,9 +78,9 @@ class LogHygieneIT {
                 .andExpect(status().isBadRequest());
 
         // confirm: a wrong PIN, a malformed PIN, then the right one, then a byte-identical replay
-        String wrongPin = Payloads.confirm("1234");
-        String badPin = Payloads.confirm("12a4");
-        String rightPin = Payloads.confirm("9999");
+        String wrongPin = Payloads.confirm(session.sessionKey(), "1234");
+        String badPin = Payloads.confirm(session.sessionKey(), "12a4");
+        String rightPin = Payloads.confirm(session.sessionKey(), "9999");
         secrets.addAll(List.of(wrongPin, badPin, rightPin));
         omar.confirmWithPayload(inquiryId, UUID.randomUUID(), wrongPin)
                 .andExpect(status().isBadRequest());
@@ -78,6 +94,7 @@ class LogHygieneIT {
         mvc.perform(
                         withClientHeaders(post("/v1/payments/confirm"))
                                 .header(Headers.USER_ID, "usr_03")
+                                .header(Headers.SESSION_ID, session.sessionId())
                                 .header(Headers.IDEMPOTENCY_KEY, UUID.randomUUID().toString())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
