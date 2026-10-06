@@ -2,17 +2,13 @@
   "info": {
     "_postman_id": "8a0c4e6f-1b2d-4c3e-9f5a-7b6c5d4e3f21",
     "name": "Momkn Pay v1",
-    "description": "Every endpoint and every mock rule of the Momkn Pay backend (contract: docs/openapi.yaml, v2.0.0).\n\nNo authentication and no sessions: requests name the user with X-User-Id, and payloads are encrypted with the static shared key in the `payloadKey` variable.",
+    "description": "Every endpoint and every mock rule of the Momkn Pay backend (contract: docs/openapi.yaml, v3.0.0).\n\nNo authentication: set `userId` to usr_01 / usr_02 / usr_03. The payload key comes from 01 → Create session.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
       "value": "https://localhost/v1"
-    },
-    {
-      "key": "payloadKey",
-      "value": ""
     },
     {
       "key": "platform",
@@ -31,8 +27,40 @@
       "value": ""
     },
     {
+      "key": "sessionId",
+      "value": ""
+    },
+    {
+      "key": "sessionKey",
+      "value": ""
+    },
+    {
       "key": "syncedAt",
       "value": "2026-01-01T00:00:00Z"
+    },
+    {
+      "key": "sessionId_usr_01",
+      "value": ""
+    },
+    {
+      "key": "sessionKey_usr_01",
+      "value": ""
+    },
+    {
+      "key": "sessionId_usr_02",
+      "value": ""
+    },
+    {
+      "key": "sessionKey_usr_02",
+      "value": ""
+    },
+    {
+      "key": "sessionId_usr_03",
+      "value": ""
+    },
+    {
+      "key": "sessionKey_usr_03",
+      "value": ""
     },
     {
       "key": "inquiryOk",
@@ -90,7 +118,7 @@
           "",
           "// AES-256-GCM helpers for encrypted payloads (source: postman/momkn-encrypt.js).",
           "// Request scripts load them with: eval(pm.collectionVariables.get('momknCrypto'));",
-          "pm.collectionVariables.set('momknCrypto', \"function momknEncrypt(keyBase64, plaintext, ivOverride) {\\n    // ---- bytes ------------------------------------------------------------------------------\\n    const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\\n    function fromBase64(text) {\\n        const clean = text.replace(/[^A-Za-z0-9+/]/g, '');\\n        const out = [];\\n        let buffer = 0, bits = 0;\\n        for (const ch of clean) {\\n            buffer = (buffer << 6) | B64.indexOf(ch);\\n            bits += 6;\\n            if (bits >= 8) {\\n                bits -= 8;\\n                out.push((buffer >> bits) & 0xff);\\n            }\\n        }\\n        return out;\\n    }\\n    function toBase64(bytes) {\\n        let out = '';\\n        for (let i = 0; i < bytes.length; i += 3) {\\n            const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);\\n            out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];\\n            out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : '=';\\n            out += i + 2 < bytes.length ? B64[n & 63] : '=';\\n        }\\n        return out;\\n    }\\n    function utf8(text) {\\n        const out = [];\\n        for (const ch of unescape(encodeURIComponent(text))) out.push(ch.charCodeAt(0));\\n        return out;\\n    }\\n    function randomBytes(n) {\\n        const out = new Array(n);\\n        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {\\n            const buf = new Uint8Array(n);\\n            crypto.getRandomValues(buf);\\n            for (let i = 0; i < n; i++) out[i] = buf[i];\\n        } else {\\n            for (let i = 0; i < n; i++) out[i] = Math.floor(Math.random() * 256);\\n        }\\n        return out;\\n    }\\n\\n    // ---- AES-256 block cipher (FIPS-197) -----------------------------------------------------\\n    const SBOX = new Array(256);\\n    (function buildSbox() {\\n        const rotl = (x, s) => ((x << s) | (x >> (8 - s))) & 0xff;\\n        let p = 1, q = 1;\\n        do {\\n            p = (p ^ (p << 1) ^ (p & 0x80 ? 0x1b : 0)) & 0xff; // p × 3\\n            q ^= q << 1; q ^= q << 2; q ^= q << 4; q &= 0xff;   // q ÷ 3\\n            if (q & 0x80) q ^= 0x09;\\n            SBOX[p] = (q ^ rotl(q, 1) ^ rotl(q, 2) ^ rotl(q, 3) ^ rotl(q, 4) ^ 0x63) & 0xff;\\n        } while (p !== 1);\\n        SBOX[0] = 0x63;\\n    })();\\n    const xtime = (b) => ((b << 1) ^ (b & 0x80 ? 0x1b : 0)) & 0xff;\\n\\n    function expandKey(key) { // 32-byte key → 60 words of 4 bytes\\n        const words = [];\\n        for (let i = 0; i < 8; i++) words.push(key.slice(4 * i, 4 * i + 4));\\n        let rcon = 1;\\n        for (let i = 8; i < 60; i++) {\\n            let t = words[i - 1].slice();\\n            if (i % 8 === 0) {\\n                t = [SBOX[t[1]] ^ rcon, SBOX[t[2]], SBOX[t[3]], SBOX[t[0]]];\\n                rcon = xtime(rcon);\\n            } else if (i % 8 === 4) {\\n                t = t.map((b) => SBOX[b]);\\n            }\\n            words.push(words[i - 8].map((b, j) => b ^ t[j]));\\n        }\\n        return words;\\n    }\\n\\n    function encryptBlock(words, input) {\\n        let s = input.slice();\\n        const addRoundKey = (round) => {\\n            for (let i = 0; i < 16; i++) s[i] ^= words[round * 4 + (i >> 2)][i & 3];\\n        };\\n        const subShift = () => {\\n            const t = new Array(16);\\n            for (let c = 0; c < 4; c++) {\\n                for (let r = 0; r < 4; r++) t[r + 4 * c] = SBOX[s[r + 4 * ((c + r) % 4)]];\\n            }\\n            s = t;\\n        };\\n        const mixColumns = () => {\\n            for (let c = 0; c < 4; c++) {\\n                const a = s.slice(4 * c, 4 * c + 4);\\n                const x = a.map(xtime);\\n                s[4 * c] = x[0] ^ x[1] ^ a[1] ^ a[2] ^ a[3];\\n                s[4 * c + 1] = a[0] ^ x[1] ^ x[2] ^ a[2] ^ a[3];\\n                s[4 * c + 2] = a[0] ^ a[1] ^ x[2] ^ x[3] ^ a[3];\\n                s[4 * c + 3] = x[0] ^ a[0] ^ a[1] ^ a[2] ^ x[3];\\n            }\\n        };\\n        addRoundKey(0);\\n        for (let round = 1; round < 14; round++) {\\n            subShift();\\n            mixColumns();\\n            addRoundKey(round);\\n        }\\n        subShift();\\n        addRoundKey(14);\\n        return s;\\n    }\\n\\n    // ---- GCM (NIST SP 800-38D) ---------------------------------------------------------------\\n    function gfMultiply(x, y) {\\n        const z = new Array(16).fill(0);\\n        const v = y.slice();\\n        for (let i = 0; i < 128; i++) {\\n            if ((x[i >> 3] >> (7 - (i & 7))) & 1) for (let j = 0; j < 16; j++) z[j] ^= v[j];\\n            const lsb = v[15] & 1;\\n            for (let j = 15; j > 0; j--) v[j] = ((v[j] >> 1) | ((v[j - 1] & 1) << 7)) & 0xff;\\n            v[0] >>= 1;\\n            if (lsb) v[0] ^= 0xe1;\\n        }\\n        return z;\\n    }\\n    function increment32(counter) {\\n        const out = counter.slice();\\n        for (let i = 15; i >= 12; i--) {\\n            out[i] = (out[i] + 1) & 0xff;\\n            if (out[i] !== 0) break;\\n        }\\n        return out;\\n    }\\n\\n    const key = fromBase64(keyBase64);\\n    if (key.length !== 32) throw new Error('the payload key must be base64 of 32 bytes');\\n    const words = expandKey(key);\\n    const iv = ivOverride || randomBytes(12);\\n    const hashKey = encryptBlock(words, new Array(16).fill(0));\\n    const j0 = iv.concat([0, 0, 0, 1]);\\n\\n    const plain = utf8(plaintext);\\n    const cipher = [];\\n    let counter = j0;\\n    for (let offset = 0; offset < plain.length; offset += 16) {\\n        counter = increment32(counter);\\n        const stream = encryptBlock(words, counter);\\n        for (let i = 0; i < 16 && offset + i < plain.length; i++) {\\n            cipher.push(plain[offset + i] ^ stream[i]);\\n        }\\n    }\\n\\n    let ghash = new Array(16).fill(0);\\n    for (let offset = 0; offset < cipher.length; offset += 16) {\\n        const block = new Array(16).fill(0);\\n        for (let i = 0; i < 16 && offset + i < cipher.length; i++) block[i] = cipher[offset + i];\\n        ghash = gfMultiply(ghash.map((b, i) => b ^ block[i]), hashKey);\\n    }\\n    const bitLength = cipher.length * 8; // AAD length is 0\\n    const lengths = new Array(16).fill(0);\\n    for (let i = 0; i < 4; i++) lengths[15 - i] = (bitLength >>> (8 * i)) & 0xff;\\n    ghash = gfMultiply(ghash.map((b, i) => b ^ lengths[i]), hashKey);\\n    const tag = encryptBlock(words, j0).map((b, i) => b ^ ghash[i]);\\n\\n    return toBase64(iv.concat(cipher, tag));\\n}\\nfunction momknSeal(keyBase64, fields) {\\n    const bytes = [];\\n    for (let i = 0; i < 16; i++) {\\n        bytes.push(\\n            typeof crypto !== 'undefined' && crypto.getRandomValues\\n                ? crypto.getRandomValues(new Uint8Array(1))[0]\\n                : Math.floor(Math.random() * 256));\\n    }\\n    const nonce = bytes.map((b) => ('0' + b.toString(16)).slice(-2)).join('');\\n    const body = Object.assign({}, fields, { nonce: nonce, ts: Math.floor(Date.now() / 1000) });\\n    return momknEncrypt(keyBase64, JSON.stringify(body));\\n}\");"
+          "pm.collectionVariables.set('momknCrypto', \"function momknEncrypt(keyBase64, plaintext, ivOverride) {\\n    // ---- bytes ------------------------------------------------------------------------------\\n    const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\\n    function fromBase64(text) {\\n        const clean = text.replace(/[^A-Za-z0-9+/]/g, '');\\n        const out = [];\\n        let buffer = 0, bits = 0;\\n        for (const ch of clean) {\\n            buffer = (buffer << 6) | B64.indexOf(ch);\\n            bits += 6;\\n            if (bits >= 8) {\\n                bits -= 8;\\n                out.push((buffer >> bits) & 0xff);\\n            }\\n        }\\n        return out;\\n    }\\n    function toBase64(bytes) {\\n        let out = '';\\n        for (let i = 0; i < bytes.length; i += 3) {\\n            const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);\\n            out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];\\n            out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : '=';\\n            out += i + 2 < bytes.length ? B64[n & 63] : '=';\\n        }\\n        return out;\\n    }\\n    function utf8(text) {\\n        const out = [];\\n        for (const ch of unescape(encodeURIComponent(text))) out.push(ch.charCodeAt(0));\\n        return out;\\n    }\\n    function randomBytes(n) {\\n        const out = new Array(n);\\n        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {\\n            const buf = new Uint8Array(n);\\n            crypto.getRandomValues(buf);\\n            for (let i = 0; i < n; i++) out[i] = buf[i];\\n        } else {\\n            for (let i = 0; i < n; i++) out[i] = Math.floor(Math.random() * 256);\\n        }\\n        return out;\\n    }\\n\\n    // ---- AES-256 block cipher (FIPS-197) -----------------------------------------------------\\n    const SBOX = new Array(256);\\n    (function buildSbox() {\\n        const rotl = (x, s) => ((x << s) | (x >> (8 - s))) & 0xff;\\n        let p = 1, q = 1;\\n        do {\\n            p = (p ^ (p << 1) ^ (p & 0x80 ? 0x1b : 0)) & 0xff; // p × 3\\n            q ^= q << 1; q ^= q << 2; q ^= q << 4; q &= 0xff;   // q ÷ 3\\n            if (q & 0x80) q ^= 0x09;\\n            SBOX[p] = (q ^ rotl(q, 1) ^ rotl(q, 2) ^ rotl(q, 3) ^ rotl(q, 4) ^ 0x63) & 0xff;\\n        } while (p !== 1);\\n        SBOX[0] = 0x63;\\n    })();\\n    const xtime = (b) => ((b << 1) ^ (b & 0x80 ? 0x1b : 0)) & 0xff;\\n\\n    function expandKey(key) { // 32-byte key → 60 words of 4 bytes\\n        const words = [];\\n        for (let i = 0; i < 8; i++) words.push(key.slice(4 * i, 4 * i + 4));\\n        let rcon = 1;\\n        for (let i = 8; i < 60; i++) {\\n            let t = words[i - 1].slice();\\n            if (i % 8 === 0) {\\n                t = [SBOX[t[1]] ^ rcon, SBOX[t[2]], SBOX[t[3]], SBOX[t[0]]];\\n                rcon = xtime(rcon);\\n            } else if (i % 8 === 4) {\\n                t = t.map((b) => SBOX[b]);\\n            }\\n            words.push(words[i - 8].map((b, j) => b ^ t[j]));\\n        }\\n        return words;\\n    }\\n\\n    function encryptBlock(words, input) {\\n        let s = input.slice();\\n        const addRoundKey = (round) => {\\n            for (let i = 0; i < 16; i++) s[i] ^= words[round * 4 + (i >> 2)][i & 3];\\n        };\\n        const subShift = () => {\\n            const t = new Array(16);\\n            for (let c = 0; c < 4; c++) {\\n                for (let r = 0; r < 4; r++) t[r + 4 * c] = SBOX[s[r + 4 * ((c + r) % 4)]];\\n            }\\n            s = t;\\n        };\\n        const mixColumns = () => {\\n            for (let c = 0; c < 4; c++) {\\n                const a = s.slice(4 * c, 4 * c + 4);\\n                const x = a.map(xtime);\\n                s[4 * c] = x[0] ^ x[1] ^ a[1] ^ a[2] ^ a[3];\\n                s[4 * c + 1] = a[0] ^ x[1] ^ x[2] ^ a[2] ^ a[3];\\n                s[4 * c + 2] = a[0] ^ a[1] ^ x[2] ^ x[3] ^ a[3];\\n                s[4 * c + 3] = x[0] ^ a[0] ^ a[1] ^ a[2] ^ x[3];\\n            }\\n        };\\n        addRoundKey(0);\\n        for (let round = 1; round < 14; round++) {\\n            subShift();\\n            mixColumns();\\n            addRoundKey(round);\\n        }\\n        subShift();\\n        addRoundKey(14);\\n        return s;\\n    }\\n\\n    // ---- GCM (NIST SP 800-38D) ---------------------------------------------------------------\\n    function gfMultiply(x, y) {\\n        const z = new Array(16).fill(0);\\n        const v = y.slice();\\n        for (let i = 0; i < 128; i++) {\\n            if ((x[i >> 3] >> (7 - (i & 7))) & 1) for (let j = 0; j < 16; j++) z[j] ^= v[j];\\n            const lsb = v[15] & 1;\\n            for (let j = 15; j > 0; j--) v[j] = ((v[j] >> 1) | ((v[j - 1] & 1) << 7)) & 0xff;\\n            v[0] >>= 1;\\n            if (lsb) v[0] ^= 0xe1;\\n        }\\n        return z;\\n    }\\n    function increment32(counter) {\\n        const out = counter.slice();\\n        for (let i = 15; i >= 12; i--) {\\n            out[i] = (out[i] + 1) & 0xff;\\n            if (out[i] !== 0) break;\\n        }\\n        return out;\\n    }\\n\\n    const key = fromBase64(keyBase64);\\n    if (key.length !== 32) throw new Error('sessionKey must be base64 of 32 bytes');\\n    const words = expandKey(key);\\n    const iv = ivOverride || randomBytes(12);\\n    const hashKey = encryptBlock(words, new Array(16).fill(0));\\n    const j0 = iv.concat([0, 0, 0, 1]);\\n\\n    const plain = utf8(plaintext);\\n    const cipher = [];\\n    let counter = j0;\\n    for (let offset = 0; offset < plain.length; offset += 16) {\\n        counter = increment32(counter);\\n        const stream = encryptBlock(words, counter);\\n        for (let i = 0; i < 16 && offset + i < plain.length; i++) {\\n            cipher.push(plain[offset + i] ^ stream[i]);\\n        }\\n    }\\n\\n    let ghash = new Array(16).fill(0);\\n    for (let offset = 0; offset < cipher.length; offset += 16) {\\n        const block = new Array(16).fill(0);\\n        for (let i = 0; i < 16 && offset + i < cipher.length; i++) block[i] = cipher[offset + i];\\n        ghash = gfMultiply(ghash.map((b, i) => b ^ block[i]), hashKey);\\n    }\\n    const bitLength = cipher.length * 8; // AAD length is 0\\n    const lengths = new Array(16).fill(0);\\n    for (let i = 0; i < 4; i++) lengths[15 - i] = (bitLength >>> (8 * i)) & 0xff;\\n    ghash = gfMultiply(ghash.map((b, i) => b ^ lengths[i]), hashKey);\\n    const tag = encryptBlock(words, j0).map((b, i) => b ^ ghash[i]);\\n\\n    return toBase64(iv.concat(cipher, tag));\\n}\\nfunction momknSeal(keyBase64, fields) {\\n    const bytes = [];\\n    for (let i = 0; i < 16; i++) {\\n        bytes.push(\\n            typeof crypto !== 'undefined' && crypto.getRandomValues\\n                ? crypto.getRandomValues(new Uint8Array(1))[0]\\n                : Math.floor(Math.random() * 256));\\n    }\\n    const nonce = bytes.map((b) => ('0' + b.toString(16)).slice(-2)).join('');\\n    const body = Object.assign({}, fields, { nonce: nonce, ts: Math.floor(Date.now() / 1000) });\\n    return momknEncrypt(keyBase64, JSON.stringify(body));\\n}\");"
         ]
       }
     }
@@ -98,11 +126,115 @@
   "item": [
     {
       "name": "00 Setup",
-      "description": "1. Certificate: every request verifies the server certificate (strictSSL). Trust ours once: Postman → Settings → Certificates → CA certificates → select certs/cert.pem. With Newman: --ssl-extra-ca-certs certs/cert.pem.\n2. Key: set the collection variable `payloadKey` to the backend's APP_PAYLOAD_KEY (the static AES-256 key, base64) before running folders 03–05. With Newman: --env-var payloadKey=<value>.\n3. `baseUrl` defaults to https://localhost/v1 (the certificate covers localhost). Use https://api.momknpay.local/v1 only with a hosts-file entry.\n4. Run the folders in order, in one run. Confirm is limited to 5 per minute per user, so wait a minute before running the collection again.",
+      "description": "1. Certificate: every request verifies the server certificate (strictSSL). Trust ours once: Postman → Settings → Certificates → CA certificates → select certs/cert.pem. With Newman: --ssl-extra-ca-certs certs/cert.pem.\n2. Set userId, then run 01 → Create session first: it stores the session id and key that the payment requests use.",
       "item": []
     },
     {
-      "name": "01 Profile",
+      "name": "01 Sessions",
+      "item": [
+        {
+          "name": "Create session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            },
+            "description": "Stores sessionId and sessionKey in collection variables for the payment folders."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('sessionId', body.sessionId);",
+                  "pm.collectionVariables.set('sessionKey', body.sessionKey);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "strictSSL": true
+          }
+        },
+        {
+          "name": "Revoke session",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                "{{sessionId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "strictSSL": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Profile",
       "item": [
         {
           "name": "Get profile",
@@ -330,7 +462,7 @@
       ]
     },
     {
-      "name": "02 Catalogue",
+      "name": "03 Catalogue",
       "item": [
         {
           "name": "List services",
@@ -488,9 +620,58 @@
       ]
     },
     {
-      "name": "03 Inquiry rules",
-      "description": "One request per mock rule (SRS §6): the outcome is the subscriber number's last digit. Run 03 before 04.",
+      "name": "04 Inquiry rules",
+      "description": "One request per mock rule (SRS §6): the outcome is the subscriber number's last digit. Run 04 before 05.",
       "item": [
+        {
+          "name": "Create session (usr_01)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_01"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('sessionId_usr_01', pm.response.json().sessionId);",
+                  "pm.collectionVariables.set('sessionKey_usr_01', pm.response.json().sessionKey);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "strictSSL": true
+          }
+        },
         {
           "name": "Inquiry — digit 1, worked example",
           "request": {
@@ -511,6 +692,10 @@
               {
                 "key": "X-User-Id",
                 "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
               },
               {
                 "key": "Content-Type",
@@ -539,7 +724,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750891' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750891' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -585,6 +770,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -611,7 +800,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750890' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750890' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -656,6 +845,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -682,7 +875,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750899' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750899' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -727,6 +920,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -753,7 +950,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750896' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750896' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -799,6 +996,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -825,7 +1026,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750897' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750897' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -870,6 +1071,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -896,7 +1101,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750891' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750891' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -941,6 +1146,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -967,7 +1176,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750891' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750891' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1012,6 +1221,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -1038,7 +1251,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '102475089' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '102475089' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1084,6 +1297,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -1110,7 +1327,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750892' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { subscriberNumber: '1024750892' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));",
                   "pm.collectionVariables.set('replayPayload', payload);"
@@ -1155,6 +1372,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -1195,7 +1416,7 @@
       ]
     },
     {
-      "name": "04 Confirm rules",
+      "name": "05 Confirm rules",
       "description": "Idempotency and every confirm outcome. Confirm is rate-limited to 5/min per user, so the cases are spread over usr_01 and usr_03; usr_02 is left with an empty history. INQUIRY_EXPIRED needs a 5-minute wait and is covered by the integration tests instead.",
       "item": [
         {
@@ -1218,6 +1439,10 @@
               {
                 "key": "X-User-Id",
                 "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
               },
               {
                 "key": "Idempotency-Key",
@@ -1250,7 +1475,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '1234' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { pin: '1234' });",
                   "pm.variables.set('payload', payload);",
                   "pm.collectionVariables.set('confirmKey', pm.variables.replaceIn('{{$guid}}'));",
                   "pm.collectionVariables.set('confirmPayload', payload);"
@@ -1298,6 +1523,10 @@
               {
                 "key": "X-User-Id",
                 "value": "usr_01"
+              },
+              {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
               },
               {
                 "key": "Idempotency-Key",
@@ -1363,6 +1592,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Idempotency-Key",
                 "value": "{{confirmKey}}"
               },
@@ -1393,7 +1626,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '1234' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { pin: '1234' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1438,6 +1671,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Idempotency-Key",
                 "value": "{{freshKey}}"
               },
@@ -1468,7 +1705,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '1234' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { pin: '1234' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1513,6 +1750,10 @@
                 "value": "usr_01"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_01}}"
+              },
+              {
                 "key": "Idempotency-Key",
                 "value": "{{freshKey}}"
               },
@@ -1543,7 +1784,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '1234' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_01'), { pin: '1234' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1558,6 +1799,55 @@
                   "  pm.response.to.have.status(422);",
                   "  pm.expect(pm.response.json().error.code).to.eql('AMOUNT_OUT_OF_RANGE');",
                   "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "strictSSL": true
+          }
+        },
+        {
+          "name": "Create session (usr_03)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "usr_03"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('sessionId_usr_03', pm.response.json().sessionId);",
+                  "pm.collectionVariables.set('sessionKey_usr_03', pm.response.json().sessionKey);"
                 ]
               }
             }
@@ -1588,6 +1878,10 @@
                 "value": "usr_03"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -1614,7 +1908,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750892' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { subscriberNumber: '1024750892' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1659,6 +1953,10 @@
                 "value": "usr_03"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
                 "key": "Idempotency-Key",
                 "value": "{{freshKey}}"
               },
@@ -1689,7 +1987,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '1234' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '1234' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1735,6 +2033,10 @@
                 "value": "usr_03"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
                 "key": "Idempotency-Key",
                 "value": "{{freshKey}}"
               },
@@ -1765,7 +2067,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '1234' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '1234' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1811,6 +2113,10 @@
                 "value": "usr_03"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
                 "key": "Idempotency-Key",
                 "value": "{{freshKey}}"
               },
@@ -1841,7 +2147,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '1234' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '1234' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1887,6 +2193,10 @@
                 "value": "usr_03"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
                 "key": "Idempotency-Key",
                 "value": "{{freshKey}}"
               },
@@ -1917,7 +2227,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '9999' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '9999' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -1962,6 +2272,10 @@
                 "value": "usr_03"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -1988,7 +2302,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { subscriberNumber: '1024750898' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { subscriberNumber: '1024750898' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -2033,6 +2347,10 @@
                 "value": "usr_03"
               },
               {
+                "key": "X-Session-Id",
+                "value": "{{sessionId_usr_03}}"
+              },
+              {
                 "key": "Idempotency-Key",
                 "value": "{{freshKey}}"
               },
@@ -2063,7 +2381,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "eval(pm.collectionVariables.get('momknCrypto'));",
-                  "const payload = momknSeal(pm.variables.get('payloadKey'), { pin: '9999' });",
+                  "const payload = momknSeal(pm.collectionVariables.get('sessionKey_usr_03'), { pin: '9999' });",
                   "pm.variables.set('payload', payload);",
                   "pm.variables.set('freshKey', pm.variables.replaceIn('{{$guid}}'));"
                 ]
@@ -2091,7 +2409,7 @@
       ]
     },
     {
-      "name": "05 History",
+      "name": "06 History",
       "item": [
         {
           "name": "History (usr_01)",
