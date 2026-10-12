@@ -2,6 +2,36 @@
 
 All notable changes to the Momkn Pay backend. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/). API contract changes are also recorded in the changelog inside [`docs/openapi.yaml`](docs/openapi.yaml).
 
+## [4.0.0] — 2026-10-07
+
+**Breaking:** the session key is agreed by both sides and never sent (ADR-013). Contract v4.0.0.
+
+### Added
+- `GET /v1/sessions/public-key`: the server's long-term P-256 handshake key (`keyId`, `algorithm`, `publicKey`). Not a secret.
+- `POST /v1/sessions` takes a body `{ clientPublicKey }` and returns `serverPublicKey` (the server's ephemeral key for the session).
+- `scripts/generate-session-keypair.sh` and the setting `APP_SESSION_PRIVATE_KEY` (startup fails without a valid P-256 key).
+- The Postman collection does the handshake itself (pure-JS P-256 and HKDF, checked against Node's crypto).
+
+### Changed
+- Both sides derive the AES-256 key: `HKDF-SHA256( ECDH(client, server long-term) ‖ ECDH(client, server ephemeral), info )`.
+
+### Removed
+- `sessionKey` in the response of `POST /v1/sessions`.
+
+### Unchanged
+- The payload format `base64(iv ‖ ciphertext ‖ tag)`, `X-Session-Id`, nonce and `ts` rules, the 30-minute lifetime, revoke, rate limits, all 22 error codes, the database schema.
+
+### Migration for clients
+1. Build the app with the server's public key (from the backend track; base64 of the X.509 SubjectPublicKeyInfo). Do not fetch it at runtime.
+2. Per session, make a P-256 key pair in memory and send `clientPublicKey` (same encoding) to `POST /v1/sessions`.
+3. Compute `ikm = ECDH(private, built-in server key) ‖ ECDH(private, serverPublicKey from the response)`, each 32 bytes.
+4. `key = HKDF-SHA256(ikm, no salt, info, 32 bytes)` with `info = "momknpay/v4/session|" + sessionId + "|" + userId + "|" + clientPublicKey + "|" + serverPublicKey` (UTF-8, the keys exactly as the base64 strings sent and received).
+5. Use `key` exactly as `sessionKey` was used before. Discard the private key and the key on logout, expiry or exit.
+
+- iOS: `P256.KeyAgreement.PrivateKey()`, `publicKey.derRepresentation`, `sharedSecretFromKeyAgreement(with:)`, `HKDF<SHA256>.deriveKey(inputKeyMaterial:info:outputByteCount:)`.
+- Android: `KeyPairGenerator("EC")` with `secp256r1`, `publicKey.encoded`, `KeyAgreement("ECDH")`, HKDF from `Mac("HmacSHA256")` (RFC 5869) or Tink.
+- Reference implementations: `postman/momkn-encrypt.js` (`momknHandshake`) and `TestCrypto.deriveSessionKey` in the tests.
+
 ## [3.0.0] — 2026-10-06
 
 **Breaking:** sessions are back, as in 1.0.0 (ADR-012). Contract v3.0.0.

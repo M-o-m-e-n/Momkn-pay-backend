@@ -54,6 +54,7 @@ gantt
 - [ ] [M4 — Hardening and release](#m4--hardening-and-release-days-1620) (8 slices)
 - [ ] [M5 — Remove sessions](#m5--remove-sessions-after-v10) (4 slices, added after v1.0; **reversed by M6**)
 - [ ] [M6 — Restore sessions](#m6--restore-sessions-after-v20) (4 slices, added after v2.0)
+- [ ] [M7 — Session key agreement](#m7--session-key-agreement-after-v30) (5 slices, added after v3.0)
 
 ### Critical path
 
@@ -381,6 +382,45 @@ flowchart LR
 - [ ] **M6-S4 · Roll out to the client tracks** *(manual)*
   - [ ] Tell both client tracks about contract v3.0.0 and get their sign-off.
   - [ ] **Done when:** both apps pay with a session key and hold no built-in key.
+
+---
+
+## M7 — Session key agreement (after v3.0)
+
+- [ ] **M7 complete** (all slices done; both client tracks have moved to contract v4.0.0)
+
+**Goal:** the session key never crosses the network (ADR-013). Client and server derive it by ECDH P-256 + HKDF-SHA256; AES-256-GCM payloads are unchanged.
+**Exit demo:** capture `POST /v1/sessions` from an app: no key in the request or the response, and the next inquiry still decrypts.
+
+- [x] **M7-S1 · Key-agreement primitives and server key**
+  - [x] `SessionKeyAgreement` (parse and validate a P-256 key, ephemeral pair, two ECDH results, HKDF-SHA256; the only class using `KeyAgreement`/`KDF`).
+  - [x] `ServerKeyPair` from `APP_SESSION_PRIVATE_KEY` (fail-fast), `keyId`; `AppProperties`, `application.yml`, `.env.example`.
+  - [x] `scripts/generate-session-keypair.sh`.
+  - [x] **Done when:** ECDH matches RFC 5903 §8.1, the client HKDF matches RFC 5869, off-curve and wrong-curve keys are rejected, the ArchUnit rule holds, and the crypto coverage gate passes.
+  - Refs: ADR-013, NFR-SEC-4, LLD §8.3
+
+- [x] **M7-S2 · Sessions API and contract v4.0.0**
+  - [x] `POST /v1/sessions` with `{clientPublicKey}` → `{sessionId, serverPublicKey, expiresAt}`; `GET /v1/sessions/public-key`.
+  - [x] Contract v4.0.0 and changelog row.
+  - [x] Test support does the client side independently (`TestCrypto.deriveSessionKey`, `TestSessions`); `SessionIT`, `LogHygieneIT`, `RateLimitIT` updated.
+  - [x] **Done when:** `./mvnw clean verify` is green and `OpenApiContractIT` matches v4.0.0. *(108 unit + 114 IT)*
+  - Refs: FR-SES-1, FR-SES-3, FR-SES-7, LLD §6.1
+
+- [x] **M7-S3 · Postman and scripts**
+  - [x] `momknHandshake` in `postman/momkn-encrypt.js` (pure-JS P-256 and HKDF), verified against Node's crypto and embedded in the collection.
+  - [x] "Get server public key" request; the three session requests do the handshake; `perf-smoke.js` too.
+  - [x] **Done when:** Newman passes with certificate verification on, and the performance budgets hold. *(39 requests, 43 assertions; confirm p95 258 ms)*
+  - Refs: NFR-DOC-3, NFR-PER-1
+
+- [x] **M7-S4 · Documents and version 4.0.0**
+  - [x] ADR-013; SRS, HLD, LLD, coding standards, demo guide, README, CLAUDE.md.
+  - [x] Version 4.0.0 and CHANGELOG with the client migration steps.
+  - [x] **Done when:** no living document says the session key is returned or sent.
+  - Refs: NFR-DOC-2, NFR-DOC-4
+
+- [ ] **M7-S5 · Roll out to the client tracks** *(manual)*
+  - [ ] Give both client tracks the server public key and the migration steps; get their sign-off on v4.0.0.
+  - [ ] **Done when:** both apps pay with a derived key and the capture shows no key on the wire.
 
 ---
 

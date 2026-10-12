@@ -98,3 +98,19 @@ Version 2.0.0 (section 4) is superseded: `APP_PAYLOAD_KEY` and the shared key ar
 | Contract `docs/openapi.yaml` v3.0.0 matches the code (`OpenApiContractIT`) | ✅ |
 
 Still manual: telling both client tracks about the breaking change and tagging `v3.0`.
+
+## 6. Version 4.0.0 — session key agreement (M7)
+
+Configuration gains `APP_SESSION_PRIVATE_KEY` (`./scripts/generate-session-keypair.sh`); the matching public key goes to the client tracks.
+
+| Check | Result |
+|---|---|
+| `./mvnw clean verify` | ✅ 108 unit + 114 integration tests, coverage gate met |
+| ECDH against RFC 5903 §8.1, HKDF against RFC 5869 | ✅ (`SessionKeyAgreementTest`) |
+| Postman's pure-JS handshake against Node's crypto (`scripts/verify-postman-crypto.js`) | ✅ AES-GCM 200/200, HKDF 52/52, handshake 25/25 |
+| Newman with certificate verification on | ✅ 39 requests, 43 assertions, 0 failed |
+| `POST /v1/sessions` response contains no key | ✅ asserted in `SessionIT` and in the collection |
+| Performance smoke test | ✅ within budget (confirm p95 258 ms of 500) |
+| Contract `docs/openapi.yaml` v4.0.0 matches the code (`OpenApiContractIT`) | ✅ |
+
+Still manual: giving the server public key to both client tracks, their sign-off on v4.0.0, and tagging `v4.0`.
