@@ -4,7 +4,7 @@ Instructions for Claude when working in this repository. Follow them on **every*
 
 ## Project in one paragraph
 
-Momkn Pay is a **simulated** bill-payment backend (electricity, water, gas, internet, mobile, landline) for an internship capstone. There is one backend here, and two native clients (iOS and Android) in other repositories that consume a frozen API contract. **There is no authentication module and every endpoint is public.** The user is identified by the `X-User-Id` header, and the AES-256-GCM payload key comes from `POST /v1/sessions`: one key per session, valid 30 minutes (see `docs/DECISIONS.md`, ADR-001, ADR-003 and ADR-012). Stack: **Java 25, Spring Boot, PostgreSQL, Spring Data JPA, Flyway, Maven, Docker Compose.** Package root: `com.momknpay`.
+Momkn Pay is a **simulated** bill-payment backend (electricity, water, gas, internet, mobile, landline) for an internship capstone. There is one backend here, and two native clients (iOS and Android) in other repositories that consume a frozen API contract. **There is no authentication module and every endpoint is public.** The user is identified by the `X-User-Id` header, and the AES-256-GCM payload key is agreed at `POST /v1/sessions` by ECDH P-256 + HKDF-SHA256: one key per session, valid 30 minutes, never sent (see `docs/DECISIONS.md`, ADR-001, ADR-012 and ADR-013). Stack: **Java 25, Spring Boot, PostgreSQL, Spring Data JPA, Flyway, Maven, Docker Compose.** Package root: `com.momknpay`.
 
 ## Sources of truth (read before acting; never contradict them)
 
@@ -34,7 +34,7 @@ If a prompt conflicts with these documents, **stop and say so**. Do not silently
 
 ### 3. Read
 - Read the SRS requirements, HLD section and LLD section referenced by the slice's `Refs` line.
-- Read the existing code you will touch **and** its neighbours, then reuse existing classes: `ApiException`/`ErrorCode`, `TimeProvider`/`Clock`, `AesGcmCipher`, `IdGenerator`, `Masking`, `CurrentUserArgumentResolver`. Never create a second version of something that exists.
+- Read the existing code you will touch **and** its neighbours, then reuse existing classes: `ApiException`/`ErrorCode`, `TimeProvider`/`Clock`, `AesGcmCipher`, `SessionKeyAgreement`, `IdGenerator`, `Masking`, `CurrentUserArgumentResolver`. Never create a second version of something that exists.
 
 ### 4. Plan
 - For anything bigger than a one-file change, give a short plan first: the files to create or change, the tests to add, and the slice's **Done when** line you are aiming at.
@@ -47,7 +47,7 @@ If a prompt conflicts with these documents, **stop and say so**. Do not silently
   - "now" comes only from the injected `Clock`/`TimeProvider`. Never `Instant.now()`
   - errors are only `throw new ApiException(ErrorCode.X, field)`. No response-shaping `try/catch`
   - constructor injection. Records for DTOs. Never return `null`
-  - all AES-GCM goes through `AesGcmCipher`, with a fresh `SecureRandom` IV every time
+  - all AES-GCM goes through `AesGcmCipher`, with a fresh `SecureRandom` IV every time; all key agreement goes through `SessionKeyAgreement`
 - Match the contract in `docs/LLD.md` §6 byte for byte: paths, field names, status codes, error codes.
 - Schema changes are a **new** Flyway migration. Never edit a merged one.
 
@@ -71,10 +71,10 @@ If a prompt conflicts with these documents, **stop and say so**. Do not silently
 
 ## Hard rules (never break them, even if asked casually; push back and explain)
 
-1. **Never log, store or return** the PIN, the session key, `payload` (encrypted or decrypted) or the master key. Mask subscriber numbers in logs (`******0891`).
+1. **Never log, store or return** the PIN, the session key, an ECDH secret, `payload` (encrypted or decrypted), the master key or the handshake private key. The session key is never put in a request or a response. Mask subscriber numbers in logs (`******0891`).
 2. **Never commit secrets**: `.env`, keystores, `*.pem`, `*.p12`, keys. Update `.env.example` instead.
 3. **Never change the API contract** (paths, fields, status or error codes) without the user confirming the contract-change process (issue, sign-off from both client tracks, version bump in the changelog).
-4. **Never add an auth module, JWT, passwords or login** unless the user explicitly reopens ADR-001, and never replace the per-session key with a static or built-in key unless the user reopens ADR-012.
+4. **Never add an auth module, JWT, passwords or login** unless the user explicitly reopens ADR-001, and never replace the per-session key with a static or built-in key, or send it over the network, unless the user reopens ADR-012 or ADR-013.
 5. **Never weaken idempotency**: the lookup happens before decryption, and the database unique constraint stays.
 6. **Never use floating point for money**, and never use a non-injected clock.
 7. Do not add dependencies, frameworks or abstractions that the LLD does not call for without asking first.
@@ -97,6 +97,7 @@ Use the Maven wrapper. Integration tests (`*IT`) need Docker running (Testcontai
 | Unit tests only | `./mvnw test` |
 | One integration test | `./mvnw verify -Dit.test=SessionIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false` |
 | Certificates / SPKI pins | `TLS_KEYSTORE_PASSWORD=... ./scripts/generate-certs.sh` |
+| Session handshake key pair | `./scripts/generate-session-keypair.sh` (prints the `APP_SESSION_PRIVATE_KEY` line and the public key) |
 | Run locally | `docker compose up --build` → `https://api.momknpay.local/docs` |
 | Lint the contract | `npx @redocly/cli lint docs/openapi.yaml` |
 | Postman collection against the local stack | `npx newman run postman/momknpay.postman_collection.json --ssl-extra-ca-certs certs/cert.pem` |

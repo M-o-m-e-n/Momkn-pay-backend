@@ -33,10 +33,11 @@ Simulated bill-payment API for the Momkn Pay internship capstone: electricity, w
 On Windows, run the commands below in **Git Bash**.
 
 ```bash
-# 1. configuration: copy the template and fill the three blanks
+# 1. configuration: copy the template and fill the four blanks
 cp .env.example .env
 #    DB_PASSWORD=<anything>
 #    APP_MASTER_KEY=<output of: openssl rand -base64 32>
+#    APP_SESSION_PRIVATE_KEY=<printed by: ./scripts/generate-session-keypair.sh>
 #    TLS_KEYSTORE_PASSWORD=<anything>
 
 # 2. TLS certificate, keystore and SPKI pins (written to certs/, never committed)
@@ -69,7 +70,11 @@ Every call needs `X-Request-Id` (a UUID), `X-Client-Platform` (`ios` or `android
 npx newman run postman/momknpay.postman_collection.json --ssl-extra-ca-certs certs/cert.pem
 ```
 
-In the Postman app: Settings → Certificates → CA certificates → select `certs/cert.pem`, then run `01 Sessions → Create session` first.
+In the Postman app: Settings → Certificates → CA certificates → select `certs/cert.pem`, then run `00 Setup → Get server public key` and `01 Sessions → Create session` first.
+
+### The session handshake key
+
+`scripts/generate-session-keypair.sh` creates the server's long-term P-256 key pair once. The private key goes into `.env` as `APP_SESSION_PRIVATE_KEY` and nowhere else. The public key (`certs/session-public.pem`, also printed, also at `GET /v1/sessions/public-key`) is **not secret**: give it to the iOS and Android tracks to build into the apps, next to the SPKI pins. An app that takes it from its own build instead of the network cannot be tricked by a proxy into agreeing a key with the wrong party.
 
 ### Certificate and SPKI pins
 
@@ -87,7 +92,8 @@ curl --cacert certs/cert.pem --resolve api.momknpay.local:443:127.0.0.1 https://
 
 | Method | Path | Needs | Purpose |
 |---|---|---|---|
-| POST | `/v1/sessions` | `X-User-Id` | Create a crypto session: returns the AES-256 `sessionKey` (valid 30 min) |
+| GET | `/v1/sessions/public-key` | — | The server's long-term handshake public key (not a secret) |
+| POST | `/v1/sessions` | `X-User-Id` | Open a crypto session by key agreement: send a public key, get the server's; both sides derive the AES-256 key (valid 30 min). The key is never sent |
 | DELETE | `/v1/sessions/{id}` | `X-User-Id` | Revoke a session |
 | GET | `/v1/profile` | `X-User-Id` | Current user's profile |
 | PATCH | `/v1/profile` | `X-User-Id` | Update full name and/or email (mobile is read-only) |
@@ -108,7 +114,8 @@ curl --cacert certs/cert.pem --resolve api.momknpay.local:443:127.0.0.1 https://
 sequenceDiagram
     participant App
     participant API
-    App->>API: POST /sessions → sessionKey (memory only)
+    App->>API: POST /sessions {clientPublicKey} → serverPublicKey
+    Note over App,API: both derive the same AES key (ECDH + HKDF), it is never sent
     App->>API: POST /payments/inquiry {serviceId, AES-GCM(subscriberNumber, nonce, ts)}
     API-->>App: quote: amountDue, serviceFee, vat, total, expiresAt (+5 min)
     App->>API: POST /payments/confirm {inquiryId, AES-GCM(pin, nonce, ts)} + Idempotency-Key
@@ -218,6 +225,7 @@ This is a scaled-down **teaching** design. It covers four things, done properly:
 | **TLS only**, self-signed certificate; clients pin the SPKI hash (live + backup) | Tomcat, `scripts/generate-certs.sh` |
 | **AES-256-GCM payload encryption** of the subscriber number and PIN: fresh 12-byte IV per message, 16-byte tag, key per session | `AesGcmCipher`, `PayloadDecryptor` |
 | **Replay protection:** `ts` within ±120 s, and each nonce accepted once (a database primary key) | `ReplayGuard`, `used_nonces` |
+| **Key agreement:** the session key is derived on both sides (ECDH P-256 with the server's long-term and ephemeral keys, HKDF-SHA256) and never transmitted | `SessionKeyAgreement`, `ServerKeyPair` |
 | **Keys at rest:** session keys are stored wrapped with `APP_MASTER_KEY` (AES-GCM, bound to the session id) | `KeyWrapper` |
 | **PIN:** bcrypt cost 12, never stored or logged; 3 wrong PINs invalidate the inquiry | `ConfirmService` |
 | **Rate limits:** 5/min per user on `POST /sessions` and `POST /payments/confirm` | `RateLimiter` |
@@ -231,7 +239,7 @@ This is a scaled-down **teaching** design. It covers four things, done properly:
 Accepted because this is a teaching exercise ([SRS §8](docs/SRS.md)):
 
 1. **No authentication.** `X-User-Id` is trusted, so anyone who can reach the API can act as any user. Real auth would plug into `CurrentUserArgumentResolver` without changing controllers (ADR-002).
-2. **Anyone can obtain a session key for any user.** The payload encryption protects data in transit and in logs, not against a malicious caller.
+2. **Anyone can open a session for any user.** The key agreement keeps the key away from intermediaries and logs, not from a malicious caller, who simply runs the handshake.
 3. **A 4-digit PIN is the only payment control.** The rate limit and the 3-attempt rule only slow brute force down.
 4. **The rate limiter is in memory.** It resets on restart and is per instance.
 5. **Timeout behaviour is the clients' job.** The mock `_slow` delay makes the server late; it does not simulate a dropped connection.
@@ -257,6 +265,7 @@ The full list, with causes and alternatives, is in [docs/DECISIONS.md](docs/DECI
 | 010 | Confirm gets a 500 ms latency budget; bcrypt stays at cost 12 |
 | 011 | ~~No sessions; one static shared payload key~~ — superseded by ADR-012 |
 | 012 | Sessions are back: the payload key is issued per session again |
+| 013 | The session key is agreed (ECDH + HKDF), never sent |
 
 ---
 
@@ -270,8 +279,8 @@ The full list, with causes and alternatives, is in [docs/DECISIONS.md](docs/DECI
 
 | Gate | What it checks |
 |---|---|
-| Unit tests (`*Test`, 88) | Engine, fees, crypto, replay guard, confirm outcomes, pending resolution, architecture rules, masking |
-| Integration tests (`*IT`, 110) | Real PostgreSQL via Testcontainers: every endpoint, every error code, concurrency, rate limits, log hygiene, schema constraints, seed data |
+| Unit tests (`*Test`, 108) | Engine, fees, crypto, replay guard, confirm outcomes, pending resolution, architecture rules, masking |
+| Integration tests (`*IT`, 114) | Real PostgreSQL via Testcontainers: every endpoint, every error code, concurrency, rate limits, log hygiene, schema constraints, seed data |
 | `OpenApiContractIT` | The generated spec matches the frozen `docs/openapi.yaml`: operations, status codes, headers, parameters, body shapes |
 | `ArchitectureTest` (ArchUnit) | Layering, no cycles, no floating-point money, time only from the clock, only `AesGcmCipher` uses `Cipher`, no insecure randomness |
 | Spotless | google-java-format (AOSP); `./mvnw spotless:apply` fixes it |
@@ -286,13 +295,13 @@ The full list, with causes and alternatives, is in [docs/DECISIONS.md](docs/DECI
 
 | Endpoint | p50 ms | p95 ms | Budget |
 |---|---|---|---|
-| `GET /services` | 10.1 | 14.8 | 300 |
-| `GET /services/sync` | 11.5 | 17.3 | 300 |
-| `GET /profile` | 8.8 | 19.0 | 300 |
-| `GET /payments/transactions` | 17.1 | 32.4 | 300 |
-| `GET /payments/transactions/{id}` | 11.7 | 20.6 | 300 |
-| `POST /payments/inquiry` | 28.7 | 52.8 | 300 |
-| `POST /payments/confirm` (10 samples, rate-limited) | 233.8 | 236.3 | 500 |
+| `GET /services` | 10.8 | 19.2 | 300 |
+| `GET /services/sync` | 12.5 | 21.3 | 300 |
+| `GET /profile` | 10.1 | 18.8 | 300 |
+| `GET /payments/transactions` | 17.9 | 33.1 | 300 |
+| `GET /payments/transactions/{id}` | 14.5 | 30.4 | 300 |
+| `POST /payments/inquiry` | 38.7 | 64.7 | 300 |
+| `POST /payments/confirm` (10 samples, rate-limited) | 235.0 | 258.3 | 500 |
 
 Confirm is dominated by the bcrypt cost-12 PIN check, which takes about 230 ms by itself. That is a deliberate security cost (ADR-010).
 

@@ -300,7 +300,8 @@ These rules are what the security part of the grade looks for (brief: *Security 
 | Data | Store | Log | Return in API |
 |---|---|---|---|
 | PIN | bcrypt hash only | **never** | **never** |
-| Session key | wrapped with the master key only | **never** | only once, in `POST /sessions` |
+| Session key | wrapped with the master key only | **never** | **never** (both sides derive it) |
+| Handshake private keys, ECDH secrets | **never** (environment or memory only) | **never** | **never** |
 | Encrypted payload (`payload`) | **never** | **never** | **never** |
 | Decrypted payload | **never** (in memory only) | **never** | **never** |
 | Subscriber number | plain (needed for the receipt) | **masked** (`******0891`) | on the receipt only |
