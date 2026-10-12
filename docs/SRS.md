@@ -4,8 +4,8 @@
 |---|---|
 | Document | Software Requirements Specification |
 | Product | Momkn Pay — Backend API |
-| Version | 3.0 (contract v3.0.0, paths under `/v1`) |
-| Date | 2026-10-06 |
+| Version | 4.0 (contract v4.0.0, paths under `/v1`) |
+| Date | 2026-10-07 |
 | Status | Draft for contract freeze |
 | Related documents | [HLD.md](HLD.md), [LLD.md](LLD.md), *Momkn Pay — Internship Capstone Project Brief* (PDF), *Design.pdf* (sample UI) |
 
@@ -55,7 +55,8 @@ Momkn Pay is a **simulated** bill-payment system for Egyptian utility services: 
 | **Transaction** | The record of a payment attempt, with status `SUCCESS`, `FAILED` or `PENDING`. |
 | **Idempotency key** | A client-generated UUID sent on confirm. The same key always maps to the same transaction. |
 | **Session** | A short-lived crypto context created by `POST /sessions`. It holds the AES key used to encrypt payloads. It is *not* an authentication session. |
-| **Session key** | 32 random bytes (AES-256 key), returned once in base64 when a session is created. |
+| **Session key** | The 32-byte AES-256 key of one session. Client and server each derive it during the session handshake; it is never sent (ADR-013). |
+| **Key agreement** | ECDH on curve P-256: each side combines its own private key with the other side's public key and gets the same secret. HKDF-SHA256 turns that secret into the session key. |
 | **Nonce** | 16 random bytes (hex) inside each encrypted payload, used to detect replays. |
 | **AES-GCM** | Advanced Encryption Standard in Galois/Counter Mode: authenticated encryption. |
 | **SPKI** | Subject Public Key Info. Clients pin its SHA-256 hash. |
@@ -144,20 +145,21 @@ Each requirement has acceptance criteria (AC) that a test or Postman request can
 | FR-COM-4 | User-scoped endpoints (sessions, profile, payments, transactions) MUST require `X-User-Id`. A missing header gives `400 VALIDATION_ERROR` (`field: "X-User-Id"`). An unknown user gives `404 USER_NOT_FOUND`. |
 | FR-COM-5 | Unknown JSON properties in request bodies MUST be rejected with `400 VALIDATION_ERROR` naming the property. |
 
-### 3.2 Sessions — encryption key issuance (FR-SES)
+### 3.2 Sessions — key agreement (FR-SES)
 
-The session replaces "session key issued at login" from the brief. It exists only to share the AES-256 key used to encrypt the subscriber number and PIN.
+The session replaces "session key issued at login" from the brief. It exists only to establish the AES-256 key used to encrypt the subscriber number and PIN. The key is **agreed, never sent** (ADR-013).
 
 | ID | Requirement |
 |---|---|
-| FR-SES-1 | `POST /sessions` (with `X-User-Id`) MUST create a session and return `sessionId`, `sessionKey` (base64 of 32 cryptographically random bytes) and `expiresAt`. |
+| FR-SES-1 | `POST /sessions` (with `X-User-Id` and body `{ clientPublicKey }`, a fresh P-256 public key) MUST create a session and return `sessionId`, `serverPublicKey` (the server's ephemeral P-256 key for this session) and `expiresAt`. An invalid `clientPublicKey` gives `400 VALIDATION_ERROR` with `field: "clientPublicKey"`. |
 | FR-SES-2 | A session MUST expire 30 minutes after creation. Using an expired session gives `410 SESSION_EXPIRED`. |
-| FR-SES-3 | The session key MUST be returned **only once**, in the create response. No endpoint can read it back. |
+| FR-SES-3 | The session key MUST **never be transmitted**, in either direction. Both sides derive it: HKDF-SHA256 over ECDH(client, server long-term key) ‖ ECDH(client, server ephemeral key), bound to the session id, the user and both public keys. No endpoint can read it back. |
 | FR-SES-4 | A session belongs to the user that created it. Using it with a different `X-User-Id` gives `404 SESSION_NOT_FOUND`, which does not reveal that the session exists. |
 | FR-SES-5 | `DELETE /sessions/{sessionId}` MUST revoke the session immediately (`204`). Later use gives `404 SESSION_NOT_FOUND`. |
 | FR-SES-6 | `POST /sessions` MUST be rate-limited to 5 requests per minute per `X-User-Id` (`429 RATE_LIMITED`). |
+| FR-SES-7 | `GET /sessions/public-key` MUST return the server's long-term handshake public key (`keyId`, `algorithm`, `publicKey`). It needs no `X-User-Id`. Apps use the copy they are built with; the endpoint is for tools and checks. |
 
-**AC:** Create → use for inquiry → succeeds. Wait for expiry (or revoke) → inquiry fails with the right code. A session of user A used with `X-User-Id` of user B → 404.
+**AC:** Handshake → the create response contains no key → the inquiry encrypted with the derived key succeeds. Wait for expiry (or revoke) → inquiry fails with the right code. A session of user A used with `X-User-Id` of user B → 404.
 
 ### 3.3 Profile (FR-PRO)
 
@@ -297,7 +299,7 @@ Clients switch on `code`, never on the message text. `field` names the offending
 
 ### 4.5 Encrypted payload format (shared with clients)
 - Algorithm: AES-256-GCM, 12-byte random IV per message, 128-bit tag, no additional authenticated data (AAD).
-- Key: the `sessionKey` of the session named in `X-Session-Id`.
+- Key: the session key agreed for the session named in `X-Session-Id` (FR-SES-3).
 - Wire format: `base64( iv(12) ‖ ciphertext ‖ tag(16) )`, standard base64 with padding.
 - Plaintext: UTF-8 JSON that always contains `nonce` (32 hex characters = 16 random bytes) and `ts` (Unix seconds).
 
@@ -329,9 +331,9 @@ Tooling endpoints (outside `/v1`, no custom headers needed): `GET /docs` (Swagge
 | NFR-SEC-1 | Payload encryption MUST use AES-256-GCM with a fresh 12-byte IV per message and a 128-bit tag. The server MUST never write its own padding or MAC and never use ECB mode. |
 | NFR-SEC-2 | The server MUST reject a payload whose `ts` differs from server time by more than 120 seconds, or whose `nonce` has already been seen, with `DECRYPTION_FAILED`. |
 | NFR-SEC-3 | Seen nonces MUST be retained for at least 5 minutes (longer than the ts window, so a replay can never slip through). |
-| NFR-SEC-4 | Session keys MUST be generated with a CSPRNG (`SecureRandom`) and stored **wrapped** (AES-GCM encrypted) with a master key from the environment. They are never stored in plaintext. |
+| NFR-SEC-4 | Session keys MUST be derived by key agreement (ECDH P-256 + HKDF-SHA256) with ephemeral keys from a CSPRNG (`SecureRandom`), and stored **wrapped** (AES-GCM encrypted) with a master key from the environment. They are never stored in plaintext and never transmitted. The server's long-term private key comes only from the environment. |
 | NFR-SEC-5 | PINs MUST be stored only as bcrypt hashes (cost ≥ 12). |
-| NFR-SEC-6 | Logs MUST never contain the PIN, session key, encrypted or decrypted payloads, or the master key. The subscriber number MUST be masked in logs (last 4 digits only). |
+| NFR-SEC-6 | Logs MUST never contain the PIN, session key, encrypted or decrypted payloads, the master key or the handshake private key. The subscriber number MUST be masked in logs (last 4 digits only). |
 | NFR-SEC-7 | No secret, key or certificate private key in the repository. Configuration comes from environment variables, and `.env.example` documents them. |
 | NFR-SEC-8 | TLS is mandatory. The SPKI hash of the live key and of a backup key are published for pinning. |
 | NFR-SEC-9 | Rate limits: 5/min per user on `/sessions` and `/payments/confirm`. |
@@ -453,7 +455,7 @@ total      = amountDue + serviceFee + vat
 | # | Limitation | Consequence | What a real product would do |
 |---|---|---|---|
 | L-1 | No authentication. `X-User-Id` is trusted. | Anyone who can reach the API can act as any user, read their profile and history, and create sessions for them. | OAuth2/OIDC or JWT with short-lived access tokens and refresh rotation. |
-| L-2 | The session key is issued over TLS to any caller. | The payload encryption protects against an intermediary that terminates TLS and logs bodies. It does **not** protect against a malicious caller. | Bind the key to an authenticated session or derive it via ECDH. |
+| L-2 | Any caller can open a session for any user. | The key agreement keeps the key away from an intermediary that terminates TLS and logs bodies, and from anyone who does not hold the server's private key. It does **not** protect against a malicious caller, who simply runs the handshake. | Bind the session to an authenticated user. |
 | L-3 | The PIN is the only secret that authorises a payment. | A 4-digit PIN is guessable. The limits (3 wrong PINs per inquiry, 5 confirms/min) only slow an attacker down. | Account lockout, device binding, step-up authentication. |
 | L-4 | In-memory rate limiting | Resets on restart and does not work across several instances. | Redis-backed distributed limiter. |
 
@@ -487,7 +489,7 @@ total      = amountDue + serviceFee + vat
 | Brief | This SRS | Reason |
 |---|---|---|
 | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | **Removed** | The project has no auth module. |
-| `sessionKey` issued by login | `POST /sessions` issues `sessionId` + `sessionKey`. Requests send `X-Session-Id`. | The payload-encryption learning goal is kept without login. |
+| `sessionKey` issued by login | `POST /sessions` runs a key agreement; both sides derive the key, and requests send `X-Session-Id`. | The payload-encryption learning goal is kept without login, and the key is never on the wire. |
 | Logout clears the session key | `DELETE /sessions/{id}` | Same effect. |
 | `Authorization: Bearer` on protected calls | `X-User-Id` header | No tokens. |
 | `POST /profile/change-password` | **Removed** | Passwords have no use without login. |

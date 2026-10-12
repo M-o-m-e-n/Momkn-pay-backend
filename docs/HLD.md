@@ -4,8 +4,8 @@
 |---|---|
 | Document | High-Level Design |
 | Product | Momkn Pay — Backend API |
-| Version | 3.0 (contract v3.0.0, paths under `/v1`) |
-| Date | 2026-10-06 |
+| Version | 4.0 (contract v4.0.0, paths under `/v1`) |
+| Date | 2026-10-07 |
 | Related documents | [SRS.md](SRS.md) (requirements), [LLD.md](LLD.md) (detailed design) |
 
 ---
@@ -218,7 +218,8 @@ Base URL `https://api.momknpay.local/v1`. All requests carry `X-Request-Id`, `X-
 
 | Method | Path | Extra headers | Request | Success | Module | SRS |
 |---|---|---|---|---|---|---|
-| POST | `/sessions` | `X-User-Id` | — | `201` `{sessionId, sessionKey, expiresAt}` | session | FR-SES-1 |
+| GET | `/sessions/public-key` | — | — | `200` `{keyId, algorithm, publicKey}` | session | FR-SES-7 |
+| POST | `/sessions` | `X-User-Id` | `{clientPublicKey}` | `201` `{sessionId, serverPublicKey, expiresAt}` | session | FR-SES-1 |
 | DELETE | `/sessions/{sessionId}` | `X-User-Id` | — | `204` | session | FR-SES-5 |
 | GET | `/profile` | `X-User-Id` | — | `200` Profile | user | FR-PRO-1 |
 | PATCH | `/profile` | `X-User-Id` | `{fullName?, email?}` | `200` Profile | user | FR-PRO-2 |
@@ -245,14 +246,18 @@ sequenceDiagram
     participant KW as KeyWrapper
     participant DB as PostgreSQL
 
-    App->>API: POST /sessions (X-User-Id: usr_01)
-    API->>API: rate-limit check (5/min/user)
-    API->>API: key = SecureRandom 32 bytes
+    Note over App: built with the server's long-term public key S
+    App->>App: fresh key pair (c, C)
+    App->>API: POST /sessions (X-User-Id: usr_01) {clientPublicKey: C}
+    API->>API: rate-limit check (5/min/user), validate C (on P-256)
+    API->>API: fresh key pair (e, E)
+    API->>API: key = HKDF( ECDH(s, C) ‖ ECDH(e, C), info: session, user, C, E )
     API->>KW: wrap(key) with MASTER_KEY (AES-GCM)
     KW-->>API: wrappedKey
     API->>DB: INSERT sessions(id, user_id, wrapped_key, expires_at=now+30m)
-    API-->>App: 201 {sessionId, sessionKey: base64(key), expiresAt}
-    Note over App: Key kept in memory only.<br/>Discarded on DELETE /sessions or app kill.
+    API-->>App: 201 {sessionId, serverPublicKey: E, expiresAt}
+    App->>App: key = HKDF( ECDH(c, S) ‖ ECDH(c, E), same info )
+    Note over App,API: The key was never sent. c, e and the key live in memory only.<br/>The key dies on DELETE /sessions, expiry or app kill.
 ```
 
 ### 8.2 Catalogue: first load and delta sync
@@ -484,6 +489,7 @@ The full DDL, indexes and constraints are in LLD §4.
 | 2 | AES-256-GCM payload encryption of the subscriber number and PIN. | An intermediary that terminates TLS and logs bodies (proxy, load balancer, APM). | `PayloadDecryptor` |
 | 3 | Replay guard: `ts` within ±120 s and single-use `nonce` (kept 5 min). | Captured-payload replay. | `ReplayGuard`, `used_nonces` |
 | 4 | Session keys wrapped with `APP_MASTER_KEY` (AES-GCM) at rest, 30-min TTL, owner-bound, revocable. | A database dump that reveals live keys. | `KeyWrapper`, `sessions` |
+| 4a | Session key **agreed, never sent**: ECDH P-256 with the server's long-term key (only the real server can compute it) and an ephemeral key (forward secrecy), then HKDF-SHA256. | An intermediary that reads or rewrites the session response; a later leak of the long-term key exposing recorded sessions. | `SessionKeyAgreement`, `ServerKeyPair` |
 | 5 | PIN stored as a bcrypt hash (cost 12). 3 wrong PINs invalidate the inquiry. | PIN disclosure, brute force per inquiry. | `ConfirmService` |
 | 6 | Rate limits: 5/min/user on `/sessions` and `/payments/confirm`. | PIN brute force, key-issuance abuse. | `RateLimitInterceptor` |
 | 7 | Log hygiene: no PIN, key, payload or full subscriber number in logs. | Secrets leaking through logs. | Logback config, `Masking` |
@@ -494,7 +500,7 @@ The full DDL, indexes and constraints are in LLD §4.
 ```
 plaintext  = UTF-8 JSON { ...fields, "nonce": <32 hex>, "ts": <unix seconds> }
 iv         = 12 random bytes (new for EVERY message)
-ct ‖ tag   = AES-256-GCM(key = sessionKey, iv, plaintext), tag = 128 bits, no AAD
+ct ‖ tag   = AES-256-GCM(key = the agreed session key, iv, plaintext), tag = 128 bits, no AAD
 wire       = base64( iv ‖ ct ‖ tag )
 ```
 
@@ -527,7 +533,7 @@ Because `X-User-Id` is trusted (SRS L-1), controls 2–6 **do not** stop a malic
 | Correlation | `RequestIdFilter` puts `X-Request-Id` in the MDC and clears it after the request. |
 | Access log | One summary line per request: method, path template, status, duration, platform, version, user ID. **No bodies.** |
 | Business events | `inquiry.created`, `payment.confirmed`, `payment.replayed`, `payment.pin_failed`, `session.created`. Each logs IDs and a masked subscriber number (`******0891`) only. |
-| Forbidden in logs | PIN, `sessionKey`, `payload` (encrypted or decrypted), `APP_MASTER_KEY`, DB password. |
+| Forbidden in logs | PIN, the session key, ECDH secrets, `payload` (encrypted or decrypted), `APP_MASTER_KEY`, `APP_SESSION_PRIVATE_KEY`, DB password. |
 | Verification | `LogHygieneTest` runs the full payment flow with a captured appender and asserts that the forbidden strings never appear. Interns also `grep` their logs as a review item. |
 | Health | Spring Boot Actuator `health` only. No other actuator endpoints are exposed. |
 
@@ -539,6 +545,7 @@ Because `X-User-Id` is trusted (SRS L-1), controls 2–6 **do not** stop a malic
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | PostgreSQL connection | `db`, `5432`, `momknpay`, `momknpay`, `change-me` |
 | `APP_MASTER_KEY` | base64 32-byte key that wraps session keys | `openssl rand -base64 32` |
+| `APP_SESSION_PRIVATE_KEY` | base64 PKCS#8 P-256 private key of the session handshake; its public key goes to the apps | `./scripts/generate-session-keypair.sh` |
 | `TLS_KEYSTORE_PATH`, `TLS_KEYSTORE_PASSWORD` | PKCS#12 keystore | `/certs/keystore.p12`, `change-me` |
 | `APP_SESSION_TTL` | Session lifetime | `PT30M` |
 | `APP_INQUIRY_TTL` | Inquiry lifetime | `PT5M` |
@@ -546,7 +553,7 @@ Because `X-User-Id` is trusted (SRS L-1), controls 2–6 **do not** stop a malic
 | `APP_SLOW_DELAY` | `_slow` delay | `PT8S` |
 | `APP_PENDING_DELAY` | PENDING → SUCCESS delay | `PT10S` |
 
-The application **fails fast at startup** if `APP_MASTER_KEY` is missing or does not decode to 32 bytes.
+The application **fails fast at startup** if `APP_MASTER_KEY` is missing or does not decode to 32 bytes, or if `APP_SESSION_PRIVATE_KEY` is missing or is not a P-256 private key.
 
 ---
 

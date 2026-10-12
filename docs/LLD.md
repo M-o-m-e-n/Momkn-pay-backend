@@ -4,8 +4,8 @@
 |---|---|
 | Document | Low-Level Design |
 | Product | Momkn Pay — Backend API |
-| Version | 3.0 (contract v3.0.0, paths under `/v1`) |
-| Date | 2026-10-06 |
+| Version | 4.0 (contract v4.0.0, paths under `/v1`) |
+| Date | 2026-10-07 |
 | Related documents | [SRS.md](SRS.md) (requirements), [HLD.md](HLD.md) (architecture) |
 
 ---
@@ -446,26 +446,43 @@ interface TransactionRepository extends JpaRepository<Transaction, String> {
 
 Common request headers on every `/v1` call: `X-Request-Id: <uuid>`, `X-Client-Platform: ios|android`, `X-Client-Version: <text>`. Every error uses the envelope in SRS §4.3.
 
-### 6.1 `POST /v1/sessions` — create a crypto session
+### 6.1 `POST /v1/sessions` — open a crypto session (key agreement)
 
 | | |
 |---|---|
 | Headers | `X-User-Id` |
-| Body | none |
+| Body | `{ "clientPublicKey": "<base64 SPKI of a fresh P-256 key>" }` |
 | Success | `201 Created` |
-| Errors | `400 VALIDATION_ERROR` (X-User-Id), `404 USER_NOT_FOUND`, `429 RATE_LIMITED` |
+| Errors | `400 VALIDATION_ERROR` (X-User-Id, `clientPublicKey`), `404 USER_NOT_FOUND`, `429 RATE_LIMITED` |
 
 ```json
 {
   "sessionId": "ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60",
-  "sessionKey": "q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=",
+  "serverPublicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFGYPV1CqxEKYF1QZ1BC2ncpEQGRDDjDxXIhpZabbQHe9JzHv7CPe0yOwH8PpEkhSUu2FwlRdv9rDwrToEvxPig==",
   "expiresAt": "2026-09-20T10:30:00Z"
 }
 ```
 
+The response carries **no key**. `serverPublicKey` is the server's ephemeral key for this session; the client derives the session key from it (§8.3).
+
 ```java
-public record CreateSessionResponse(String sessionId, String sessionKey, Instant expiresAt) {}
+public record CreateSessionRequest(@NotBlank @Size(max = 256) String clientPublicKey) {}
+public record CreateSessionResponse(String sessionId, String serverPublicKey, Instant expiresAt) {}
 ```
+
+### 6.1a `GET /v1/sessions/public-key` — the server's long-term handshake key
+
+| | |
+|---|---|
+| Headers | none beyond the common ones (no `X-User-Id`) |
+| Success | `200` |
+| Errors | `400 VALIDATION_ERROR` (headers) |
+
+```json
+{ "keyId": "9f2c41d07a3be518", "algorithm": "ECDH-P256", "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFGYPV1CqxEKYF1QZ1BC2ncpEQGRDDjDxXIhpZabbQHe9JzHv7CPe0yOwH8PpEkhSUu2FwlRdv9rDwrToEvxPig==" }
+```
+
+Not a secret. Apps use the copy they are built with, so an intermediary cannot replace it; `keyId` is the first 8 bytes of SHA-256 of the key, in hex.
 
 ### 6.2 `DELETE /v1/sessions/{sessionId}` — revoke
 
@@ -865,17 +882,42 @@ byte[] wrap(String sessionId, byte[] key)       = cipher.encrypt(master, key, ut
 byte[] unwrap(String sessionId, byte[] wrapped) = cipher.decrypt(master, wrapped, utf8(sessionId))
 ```
 
-### 8.3 `SessionService.create`
+### 8.3 Session key agreement and `SessionService.create`
+
+Curve P-256. Public keys are base64 of their X.509 SubjectPublicKeyInfo (DER, 91 bytes). The key is derived on both sides and never sent (ADR-013).
+
+| Key | Who holds the private half | Lifetime |
+|---|---|---|
+| Server long-term `(s, S)` | `ServerKeyPair`, from `APP_SESSION_PRIVATE_KEY` | until rotated; `S` is built into the apps |
+| Client ephemeral `(c, C)` | the app, in memory | one session |
+| Server ephemeral `(e, E)` | `SessionKeyAgreement.respond`, in memory | one request |
 
 ```
-user = userLookup.require(userId)
-key  = 32 bytes from SecureRandom
+// server                                             // client
+C    = parsePublicKey(clientPublicKey)                (c, C) = fresh P-256 key pair
+       else VALIDATION_ERROR("clientPublicKey")       POST /sessions { clientPublicKey: C }
 id   = "ses_" + hex(16 random bytes)
-now  = time.now()
+(e,E)= fresh P-256 key pair
+ikm  = ECDH(s, C) ‖ ECDH(e, C)                        ikm  = ECDH(c, S) ‖ ECDH(c, E)
+info = utf8("momknpay/v4/session|" + id + "|" + userId + "|" + C + "|" + E)     // same on both sides
+key  = HKDF-SHA256(ikm, salt = none, info, 32)        key  = HKDF-SHA256(ikm, salt = none, info, 32)
+
 sessionRepo.save(Session(id, userId, keyWrapper.wrap(id, key), now, now + APP_SESSION_TTL))
-response = (id, base64(key), expiresAt)
-Arrays.fill(key, 0)
-log.info("session.created sessionId={} userId={}", id, userId)     // never the key
+response = (id, E, expiresAt)                         // no key
+zero(key, ikm, both ECDH results)
+log.info("session.created sessionId={} userId={}", id, userId)     // never a key
+```
+
+`C` and `E` in `info` are the exact base64 strings that were sent. `parsePublicKey` accepts only a point on P-256 (curve parameters, field range and the curve equation are checked).
+
+Why two ECDH results: `ECDH(·, long-term)` can only be computed by the holder of `s`, so an intermediary that replaces `E` cannot learn the key (the client just fails with `DECRYPTION_FAILED`). `ECDH(·, ephemeral)` gives forward secrecy: a later leak of `s` does not open recorded sessions. This is the Noise `NK` pattern, and the same ECDH + HKDF + AES-GCM construction that HPKE (RFC 9180) standardises.
+
+```java
+// common.crypto — the only class that may use javax.crypto.KeyAgreement and javax.crypto.KDF
+ECPublicKey parsePublicKey(String spkiBase64)                    // CryptoException if not valid P-256
+Handshake   respond(ECPrivateKey serverStatic, ECPublicKey client, String clientKeyBase64,
+                    String sessionId, String userId)             // → (serverPublicKey E, sessionKey)
+ECPublicKey derivePublicKey(ECPrivateKey privateKey)             // S from s, at startup
 ```
 
 ### 8.4 `PayloadDecryptor.decrypt`
@@ -1177,6 +1219,7 @@ management:
 
 app:
   master-key: ${APP_MASTER_KEY}
+  session-private-key: ${APP_SESSION_PRIVATE_KEY}
   session-ttl: ${APP_SESSION_TTL:PT30M}
   inquiry-ttl: ${APP_INQUIRY_TTL:PT5M}
   replay-window: ${APP_REPLAY_WINDOW:PT120S}
@@ -1199,8 +1242,11 @@ DB_NAME=momknpay
 DB_USER=momknpay
 DB_PASSWORD=change-me
 
-# --- crypto --- generate with: openssl rand -base64 32
+# --- crypto ---
+# wraps session keys at rest; generate with: openssl rand -base64 32
 APP_MASTER_KEY=
+# private key of the session handshake; generate with: ./scripts/generate-session-keypair.sh
+APP_SESSION_PRIVATE_KEY=
 
 # --- TLS --- see LLD §13.2
 TLS_KEYSTORE_PATH=/certs/keystore.p12
@@ -1343,7 +1389,7 @@ Six closed inquiries (`status = CONFIRMED` or `OPEN`, `session_id = NULL`, alrea
 | I9 | `SeedDataIT` | 3 users with working PINs, all 6 categories, ≥ 24 visible services, the `_slow` and inactive services present. |
 | I10 | `LogHygieneTest` | Runs I6 with a captured appender and asserts that no PIN (`1234`), session key, `payload`, or full subscriber number (`1024750891`) appears in the logs. |
 
-A test helper `TestCrypto.encrypt(sessionKey, json)` mirrors exactly what the clients do, including a fresh nonce and the current `ts`.
+Test helpers mirror exactly what the clients do, independently of the server classes: `TestSessions.open(...)` runs the client side of the handshake (`TestCrypto.deriveSessionKey`), and `TestCrypto.encrypt(sessionKey, json)` encrypts with a fresh nonce and the current `ts`. `SessionKeyAgreementTest` checks ECDH against RFC 5903 §8.1 and the client HKDF against RFC 5869.
 
 ---
 
@@ -1422,7 +1468,7 @@ Both pins go in the README and the contract repository. `certs/` is git-ignored.
 ### 13.4 First run
 
 ```bash
-cp .env.example .env            # fill DB_PASSWORD, APP_MASTER_KEY, TLS_KEYSTORE_PASSWORD
+cp .env.example .env            # fill DB_PASSWORD, APP_MASTER_KEY, APP_SESSION_PRIVATE_KEY, TLS_KEYSTORE_PASSWORD
 # generate certs (13.3), add "127.0.0.1 api.momknpay.local" to the hosts file
 docker compose up --build
 # → https://api.momknpay.local/docs

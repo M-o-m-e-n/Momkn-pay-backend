@@ -22,6 +22,7 @@ flowchart TD
     C --> H[ADR-008<br/>Idempotency check before decryption]
     C -.-> K[ADR-011<br/>No sessions, static shared key<br/>superseded]
     K -.-> L[ADR-012<br/>Sessions restored]
+    L --> M[ADR-013<br/>Session key agreed, never sent]
     I[ADR-009<br/>Spring Boot + Java 25]
 ```
 
@@ -41,6 +42,7 @@ flowchart TD
 | [010](#adr-010--confirm-gets-a-500-ms-latency-budget-bcrypt-stays-at-cost-12) | Confirm gets a 500 ms latency budget; bcrypt stays at cost 12 | Accepted |
 | [011](#adr-011--remove-sessions-encrypt-payloads-with-one-static-shared-key) | Remove sessions; encrypt payloads with one static shared key | **Superseded by ADR-012** |
 | [012](#adr-012--bring-sessions-back-the-payload-key-is-issued-per-session-again) | Bring sessions back: the payload key is issued per session again | Accepted |
+| [013](#adr-013--agree-the-session-key-instead-of-sending-it) | Agree the session key instead of sending it | Accepted |
 
 ---
 
@@ -364,6 +366,49 @@ The contract moves to **v3.0.0**, a second breaking change.
 - ✅ The v1.0.0 code, tests and Postman requests were restored from git history rather than rewritten.
 - ❌ **Breaking contract change** for the second time: both client tracks must call `POST /sessions`, send `X-Session-Id`, and drop the built-in key.
 - ❌ There is still no authentication (ADR-001), so anyone can request a session for any user. The key protects payloads in transit and in logs, not against a malicious caller (SRS §8, L-2).
+
+## ADR-013 — Agree the session key instead of sending it
+
+**Status:** Accepted · **Date:** 2026-10-07 · **Amends:** ADR-003 and ADR-012 (how the key is established) · **Affects:** contract v4.0.0, SRS FR-SES-1, FR-SES-3, FR-SES-7, NFR-SEC-4, HLD §8.1 and §10, LLD §6.1 and §8.3
+
+### Context
+Since ADR-003, `POST /sessions` returned the AES-256 session key in the response body. Anything that can read that response gets the key: a proxy that terminates TLS, an API gateway, a log that records bodies. The brief says the payload encryption exists to protect against exactly that intermediary, so handing it the key defeats the purpose.
+
+AES-256-GCM is symmetric: there is no public or private AES key. What can be done properly is **how the two sides come to share the key**.
+
+### Decision
+The session key is **agreed, never sent** (hybrid encryption):
+
+- The server has a long-term P-256 key pair. The private key comes only from `APP_SESSION_PRIVATE_KEY`. The public key is not a secret: it is built into the apps and also served by `GET /v1/sessions/public-key`.
+- The client sends a fresh ephemeral public key in `POST /v1/sessions`. The server answers with its own ephemeral public key. The response has no `sessionKey`.
+- Both sides compute `HKDF-SHA256( ECDH(client, server long-term) ‖ ECDH(client, server ephemeral) )`, with an info string that binds the key to the session id, the user and both public keys.
+- AES-256-GCM, the payload format, `X-Session-Id`, the replay rules and the wrapped storage (ADR-003) do not change.
+
+The contract moves to **v4.0.0**.
+
+### Cause
+- The key is never on the wire, so reading the session response reveals nothing.
+- An intermediary cannot substitute its own key: the first ECDH needs the server's long-term private key. An app that uses its built-in copy of the public key cannot be redirected.
+- The second ECDH, with a per-session server key, gives forward secrecy: a later leak of the long-term key does not expose recorded sessions.
+- Every platform has the primitives natively: CryptoKit `P256.KeyAgreement` and `HKDF` on iOS, `KeyAgreement("ECDH")` on Android, `KeyAgreement` and `KDF` in JDK 25. No dependency is added.
+
+### Alternatives considered
+| Alternative | Why it was rejected |
+|---|---|
+| Keep returning the key (ADR-003) | The key is visible to whoever reads the response body. |
+| HPKE (RFC 9180), the standard for "public key → AEAD" | JDK 25 and the Postman sandbox have no HPKE, so it needs a new dependency on the backend (hard rule 7) and a large hand-written implementation for Postman. The chosen design is the same ECDH + HKDF + AES-GCM construction from platform primitives. Revisit when the JDK ships HPKE. |
+| RSA-OAEP key transport (the client encrypts a key it made) | No forward secrecy, large keys, and awkward on CryptoKit. |
+| One ECDH only, with the server's long-term key | Simpler, but a leaked long-term key would open every recorded session. |
+| One ECDH only, ephemeral on both sides | Forward secret, but the server is not authenticated: a proxy could run the handshake on both sides. |
+| Per-message hybrid encryption without sessions | Bigger payloads and an asymmetric operation per request; sessions were just restored (ADR-012). |
+
+### Consequences
+- ✅ No request or response ever contains a session key. `SessionIT` asserts it.
+- ✅ The handshake is the Noise `NK` pattern; ECDH is checked against RFC 5903 and HKDF against RFC 5869.
+- ✅ No schema change and no new error code: an invalid `clientPublicKey` is a `VALIDATION_ERROR`.
+- ❌ **Breaking contract change** (v4.0.0): the client tracks must generate a key pair, derive the key and hold the server's public key in the app.
+- ❌ One more secret to manage (`APP_SESSION_PRIVATE_KEY`). Rotating it needs new app builds, or a period in which apps accept two server keys (`keyId` tells them apart).
+- ❌ The client is still not authenticated (ADR-001): anyone can run the handshake for any user (SRS §8, L-2).
 
 ---
 
