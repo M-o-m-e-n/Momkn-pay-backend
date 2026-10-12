@@ -2,12 +2,14 @@ package com.momknpay;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.momknpay.common.config.AppProperties;
+import com.momknpay.common.crypto.SessionKeyAgreement;
 import com.momknpay.payment.web.dto.ConfirmPayload;
 import com.momknpay.payment.web.dto.ConfirmRequest;
 import com.momknpay.payment.web.dto.InquiryPayload;
 import com.momknpay.payment.web.dto.InquiryRequest;
-import com.momknpay.session.web.dto.CreateSessionResponse;
-import java.time.Instant;
+import java.time.Duration;
+import java.util.Base64;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -20,10 +22,19 @@ class SensitiveToStringTest {
     private static final String BLOB = "AAECAwQFBgcICQoLjXq9mWQ2Zx0fYk1c3gUqvLw7r0E=";
 
     @Test
-    void sessionKeyIsMasked() {
-        String text = new CreateSessionResponse("ses_1", KEY, Instant.EPOCH).toString();
+    void derivedSessionKeyIsMasked() {
+        byte[] key = Base64.getDecoder().decode(KEY);
 
-        assertThat(text).contains("ses_1").doesNotContain(KEY);
+        String text = new SessionKeyAgreement.Handshake("server-public-key", key).toString();
+
+        assertThat(text).contains("server-public-key", "****").doesNotContain(KEY);
+    }
+
+    @Test
+    void handshakePrivateKeyIsMasked() {
+        String text = properties("private-key-value").toString();
+
+        assertThat(text).doesNotContain("private-key-value", "master-key-value");
     }
 
     @Test
@@ -44,5 +55,19 @@ class SensitiveToStringTest {
     void encryptedPayloadsAreMasked() {
         assertThat(new InquiryRequest("svc_elec_cairo", BLOB).toString()).doesNotContain(BLOB);
         assertThat(new ConfirmRequest("inq_1", BLOB).toString()).doesNotContain(BLOB);
+    }
+
+    private static AppProperties properties(String sessionPrivateKey) {
+        Duration any = Duration.ofMinutes(1);
+        return new AppProperties(
+                "master-key-value",
+                sessionPrivateKey,
+                any,
+                any,
+                any,
+                any,
+                any,
+                any,
+                new AppProperties.RateLimit(5));
     }
 }

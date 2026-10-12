@@ -38,6 +38,14 @@ class RateLimiterTest {
     private static AppProperties properties(int perMinute) {
         Duration any = Duration.ofMinutes(5);
         return new AppProperties(
-                "unused", any, any, any, any, any, any, new AppProperties.RateLimit(perMinute));
+                "unused",
+                "unused",
+                any,
+                any,
+                any,
+                any,
+                any,
+                any,
+                new AppProperties.RateLimit(perMinute));
     }
 }

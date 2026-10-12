@@ -56,6 +56,7 @@ management:
 
 app:
   master-key: ${APP_MASTER_KEY:}              # required: base64 of 32 bytes, startup fails without it
+  session-private-key: ${APP_SESSION_PRIVATE_KEY:}   # required: base64 PKCS#8 P-256 key of the session handshake (ADR-013)
   session-ttl: ${APP_SESSION_TTL:PT30M}
   inquiry-ttl: ${APP_INQUIRY_TTL:PT5M}
   replay-window: ${APP_REPLAY_WINDOW:PT120S}

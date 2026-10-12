@@ -12,6 +12,8 @@ regexes = [
     '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=''',
     # deliberately invalid 16-byte key used by StartupValidationTest
     '''AAECAwQFBgcICQoLDA0ODw==''',
-    # example sessionKey in docs/LLD.md and docs/openapi.yaml
+    # test key pair of the session handshake (src/test/resources/config/application.yml)
+    '''MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg8qgFDYscBWgzcBO8y/v2040h1EuiCfKNfx9\+H9sVliehRANCAAQUZg9XUKrEQpgXVBnUELadykRAZEMOMPFciGllpttAd70nMe/sI97TI7Afw\+kSSFJS7YXCVF2/2sPCtOgS/E\+K''',
+    # example sessionKey that appeared in docs/LLD.md and docs/openapi.yaml up to v3.0 (still in history)
     '''q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=''',
 ]

@@ -70,6 +70,7 @@ class ConfirmServiceTest {
                     time,
                     new AppProperties(
                             "unused",
+                            "unused",
                             Duration.ofMinutes(30),
                             Duration.ofMinutes(5),
                             Duration.ofSeconds(120),

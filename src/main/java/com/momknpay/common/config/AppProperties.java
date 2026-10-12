@@ -13,6 +13,8 @@ import org.springframework.validation.annotation.Validated;
  * missing or invalid.
  *
  * @param masterKey base64 of 32 bytes; wraps session keys at rest (never logged)
+ * @param sessionPrivateKey base64 of the PKCS#8 P-256 private key of the session handshake (never
+ *     logged)
  * @param sessionTtl lifetime of a crypto session
  * @param inquiryTtl lifetime of a fees inquiry
  * @param replayWindow allowed difference between a payload's {@code ts} and server time
@@ -24,6 +26,7 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties("app")
 public record AppProperties(
         @NotBlank String masterKey,
+        @NotBlank String sessionPrivateKey,
         @NotNull Duration sessionTtl,
         @NotNull Duration inquiryTtl,
         @NotNull Duration replayWindow,
@@ -36,7 +39,7 @@ public record AppProperties(
 
     @Override
     public String toString() {
-        return "AppProperties[masterKey=****, sessionTtl=%s, inquiryTtl=%s]"
+        return "AppProperties[masterKey=****, sessionPrivateKey=****, sessionTtl=%s, inquiryTtl=%s]"
                 .formatted(sessionTtl, inquiryTtl);
     }
 }

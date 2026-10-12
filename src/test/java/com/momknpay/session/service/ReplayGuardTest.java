@@ -73,6 +73,14 @@ class ReplayGuardTest {
     static AppProperties properties(Duration replayWindow) {
         Duration any = Duration.ofMinutes(5);
         return new AppProperties(
-                "unused", any, any, replayWindow, any, any, any, new AppProperties.RateLimit(5));
+                "unused",
+                "unused",
+                any,
+                any,
+                replayWindow,
+                any,
+                any,
+                any,
+                new AppProperties.RateLimit(5));
     }
 }

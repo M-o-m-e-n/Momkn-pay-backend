@@ -115,6 +115,19 @@ class ArchitectureTest {
                     .because("all AES-GCM goes through AesGcmCipher (CODING_STANDARDS §10.2)");
 
     @ArchTest
+    static final ArchRule onlySessionKeyAgreementDoesKeyAgreement =
+            noClasses()
+                    .that()
+                    .doNotHaveSimpleName("SessionKeyAgreement")
+                    .should()
+                    .dependOnClassesThat()
+                    .haveFullyQualifiedName("javax.crypto.KeyAgreement")
+                    .orShould()
+                    .dependOnClassesThat()
+                    .haveFullyQualifiedName("javax.crypto.KDF")
+                    .because("the session handshake lives in one class (ADR-013)");
+
+    @ArchTest
     static final ArchRule noInsecureRandom =
             noClasses()
                     .should()

@@ -53,6 +53,6 @@ class KeyWrapperTest {
     private static AppProperties props(String masterKey) {
         Duration any = Duration.ofMinutes(1);
         return new AppProperties(
-                masterKey, any, any, any, any, any, any, new AppProperties.RateLimit(5));
+                masterKey, "unused", any, any, any, any, any, any, new AppProperties.RateLimit(5));
     }
 }
