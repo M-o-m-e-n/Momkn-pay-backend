@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.common.web.Headers;
+import com.momknpay.support.TestCrypto;
+import com.momknpay.support.TestSessions;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -79,6 +81,8 @@ class RateLimitIT {
     }
 
     private ResultActions createSession(String userId) throws Exception {
-        return mvc.perform(withClientHeaders(post("/v1/sessions")).header(Headers.USER_ID, userId));
+        return mvc.perform(
+                TestSessions.createRequest(
+                        userId, TestCrypto.spki(TestCrypto.clientKeyPair().getPublic())));
     }
 }

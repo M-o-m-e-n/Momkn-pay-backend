@@ -10,8 +10,9 @@ import com.jayway.jsonpath.JsonPath;
 import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.common.web.Headers;
 import com.momknpay.session.service.SessionService;
-import com.momknpay.session.web.dto.CreateSessionResponse;
 import com.momknpay.support.Payloads;
+import com.momknpay.support.TestSession;
+import com.momknpay.support.TestSessions;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -41,11 +42,11 @@ class InquiryIT {
     @Autowired private SessionService sessionService;
     @Autowired private JdbcTemplate jdbc;
 
-    private CreateSessionResponse session;
+    private TestSession session;
 
     @BeforeEach
     void openSession() {
-        session = sessionService.create("usr_01");
+        session = TestSessions.open(sessionService, "usr_01");
     }
 
     @Test

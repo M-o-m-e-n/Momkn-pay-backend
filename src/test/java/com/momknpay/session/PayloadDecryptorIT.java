@@ -9,8 +9,9 @@ import com.momknpay.common.error.ErrorCode;
 import com.momknpay.session.service.EncryptedPayload;
 import com.momknpay.session.service.PayloadDecryptor;
 import com.momknpay.session.service.SessionService;
-import com.momknpay.session.web.dto.CreateSessionResponse;
 import com.momknpay.support.TestCrypto;
+import com.momknpay.support.TestSession;
+import com.momknpay.support.TestSessions;
 import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,11 +39,11 @@ class PayloadDecryptorIT {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private TransactionTemplate transactions;
 
-    private CreateSessionResponse session;
+    private TestSession session;
 
     @BeforeEach
     void createSession() {
-        session = sessionService.create("usr_01");
+        session = TestSessions.open(sessionService, "usr_01");
     }
 
     @Test
@@ -93,7 +94,7 @@ class PayloadDecryptorIT {
 
     @Test
     void payloadEncryptedWithAnotherSessionsKeyIsRejected() {
-        CreateSessionResponse other = sessionService.create("usr_01");
+        TestSession other = TestSessions.open(sessionService, "usr_01");
         String payload =
                 encrypt(other.sessionKey(), "1024750891", TestCrypto.nonce(), TestCrypto.nowTs());
 

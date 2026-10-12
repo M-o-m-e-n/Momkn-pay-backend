@@ -12,6 +12,7 @@ import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.common.web.Headers;
 import com.momknpay.session.service.SessionService;
 import com.momknpay.support.PaymentClient;
+import com.momknpay.support.TestSessions;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Comparator;
@@ -142,7 +143,8 @@ class TransactionIT {
 
     @Test
     void duePendingPaymentIsReportedAsSuccessWhenRead() throws Exception {
-        PaymentClient omar = new PaymentClient(mvc, "usr_03", sessionService.create("usr_03"));
+        PaymentClient omar =
+                new PaymentClient(mvc, "usr_03", TestSessions.open(sessionService, "usr_03"));
         String inquiryId = omar.openInquiry("svc_elec_cairo", "1024750898");
         String transactionId =
                 JsonPath.read(

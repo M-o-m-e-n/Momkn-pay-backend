@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Momkn Pay API
-  version: 3.0.0
+  version: 4.0.0
   summary: Simulated bill-payment API for the Momkn Pay internship capstone.
   description: |
     Contract shared by the backend, iOS and Android tracks. Frozen after publication:
@@ -15,9 +15,19 @@ info:
     - Timestamps are ISO 8601 UTC with second precision (`2026-09-20T10:00:00Z`).
     - Every non-2xx response uses the `ErrorResponse` envelope. Clients switch on `error.code`.
     - Sensitive fields (subscriber number, PIN) travel AES-256-GCM encrypted in `payload`:
-      `base64(iv[12] ‖ ciphertext ‖ tag[16])`, key = the `sessionKey` from `POST /sessions`,
+      `base64(iv[12] ‖ ciphertext ‖ tag[16])`, key = the session key agreed at `POST /sessions`,
       no AAD, plaintext JSON always carries `nonce` (32 hex chars) and `ts` (unix seconds).
       The server rejects `ts` more than 120 s from server time and any reused `nonce`.
+
+    **Session key agreement (the key is never sent).** Curve P-256; public keys are base64 of
+    their X.509 SubjectPublicKeyInfo (DER) encoding.
+    1. The app is built with the server's long-term public key (also at `GET /sessions/public-key`).
+    2. The client makes a fresh key pair and sends its public key to `POST /sessions`.
+    3. The response carries the server's ephemeral public key for this session.
+    4. Both sides compute `ikm = ECDH(client, server long-term) ‖ ECDH(client, server ephemeral)`
+       and `key = HKDF-SHA256(ikm, salt = none, info, 32 bytes)` with
+       `info = "momknpay/v4/session|" + sessionId + "|" + userId + "|" + clientPublicKey + "|" + serverPublicKey`
+       (UTF-8; the two keys exactly as the base64 strings that were sent).
 
     ## Changelog
     | Version | Date | Change |
@@ -25,6 +35,7 @@ info:
     | 1.0.0 | 2026-09-30 | Initial contract (no-auth variant of the capstone brief). |
     | 2.0.0 | 2026-10-01 | **Breaking.** Sessions removed: `POST /sessions`, `DELETE /sessions/{sessionId}` and the `X-Session-Id` header are gone; payloads are encrypted with one static shared key. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` removed; inquiry no longer returns 410. (ADR-011) |
     | 3.0.0 | 2026-10-06 | **Breaking.** Sessions restored as in 1.0.0: `POST /sessions` issues a 30-minute AES-256 key, `DELETE /sessions/{sessionId}` revokes it, and inquiry and confirm require the `X-Session-Id` header. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` are back; the static shared key of 2.0.0 is gone. (ADR-012) |
+    | 4.0.0 | 2026-10-07 | **Breaking.** The session key is no longer sent: `POST /sessions` takes `{ clientPublicKey }` and returns `serverPublicKey` instead of `sessionKey`; both sides derive the key (ECDH P-256 + HKDF-SHA256). New `GET /sessions/public-key`. Payload format, `X-Session-Id` and error codes are unchanged. (ADR-013) |
 # Deliberately public: no security schemes (ADR-001).
 security: []
 servers:
@@ -32,7 +43,7 @@ servers:
     description: Local (Docker Compose, self-signed certificate — pin the published SPKI hash)
 tags:
   - name: Sessions
-    description: Crypto sessions that issue the AES-256 payload key.
+    description: Crypto sessions. The AES-256 payload key is agreed (ECDH), never sent.
   - name: Profile
     description: The current user's profile.
   - name: Catalogue
@@ -43,19 +54,54 @@ tags:
     description: Payment history and receipts.
 
 paths:
+  /sessions/public-key:
+    get:
+      tags: [Sessions]
+      operationId: getSessionPublicKey
+      summary: The server's long-term public key of the session handshake
+      description: |
+        Not a secret. Apps should use the copy they are built with, so that an intermediary
+        cannot replace it; this endpoint is for tools and for checking that copy.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+      responses:
+        '200':
+          description: The public key.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerPublicKeyResponse' }
+              example:
+                keyId: 9f2c41d07a3be518
+                algorithm: ECDH-P256
+                publicKey: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFGYPV1CqxEKYF1QZ1BC2ncpEQGRDDjDxXIhpZabbQHe9JzHv7CPe0yOwH8PpEkhSUu2FwlRdv9rDwrToEvxPig==
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /sessions:
     post:
       tags: [Sessions]
       operationId: createSession
-      summary: Create a crypto session and receive the AES-256 payload key
+      summary: Open a crypto session by key agreement (the key is never sent)
       description: |
-        Returns a fresh 32-byte key (base64) valid for 30 minutes. The key is returned **only here**;
-        keep it in memory, never on disk. Rate-limited to 5 per minute per user.
+        Send a fresh P-256 public key. The response holds the server's ephemeral public key;
+        both sides derive the same AES-256 key (see "Session key agreement" above), valid for
+        30 minutes. Keep the key and the private key in memory only. Rate-limited to 5 per
+        minute per user.
       parameters:
         - $ref: '#/components/parameters/RequestId'
         - $ref: '#/components/parameters/ClientPlatform'
         - $ref: '#/components/parameters/ClientVersion'
         - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSessionRequest' }
+            example:
+              clientPublicKey: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFGYPV1CqxEKYF1QZ1BC2ncpEQGRDDjDxXIhpZabbQHe9JzHv7CPe0yOwH8PpEkhSUu2FwlRdv9rDwrToEvxPig==
       responses:
         '201':
           description: Session created.
@@ -65,7 +111,7 @@ paths:
               schema: { $ref: '#/components/schemas/CreateSessionResponse' }
               example:
                 sessionId: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60
-                sessionKey: q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=
+                serverPublicKey: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFGYPV1CqxEKYF1QZ1BC2ncpEQGRDDjDxXIhpZabbQHe9JzHv7CPe0yOwH8PpEkhSUu2FwlRdv9rDwrToEvxPig==
                 expiresAt: '2026-09-20T10:30:00Z'
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -513,16 +559,31 @@ components:
       description: ISO 8601 UTC, second precision.
       example: '2026-09-20T10:00:00Z'
 
+    PublicKey:
+      type: string
+      format: byte
+      maxLength: 256
+      description: A P-256 public key, base64 of its X.509 SubjectPublicKeyInfo (DER) encoding.
+      example: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFGYPV1CqxEKYF1QZ1BC2ncpEQGRDDjDxXIhpZabbQHe9JzHv7CPe0yOwH8PpEkhSUu2FwlRdv9rDwrToEvxPig==
+    ServerPublicKeyResponse:
+      type: object
+      required: [keyId, algorithm, publicKey]
+      properties:
+        keyId: { type: string, description: Short fingerprint of the key., example: 9f2c41d07a3be518 }
+        algorithm: { type: string, enum: [ECDH-P256] }
+        publicKey: { $ref: '#/components/schemas/PublicKey' }
+    CreateSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [clientPublicKey]
+      properties:
+        clientPublicKey: { $ref: '#/components/schemas/PublicKey' }
     CreateSessionResponse:
       type: object
-      required: [sessionId, sessionKey, expiresAt]
+      required: [sessionId, serverPublicKey, expiresAt]
       properties:
         sessionId: { type: string, example: ses_4f9c2a7e0b6d4c1f8a3e5d7c9b1a2f60 }
-        sessionKey:
-          type: string
-          format: byte
-          description: base64 of 32 random bytes (AES-256 key). Memory only on the client.
-          example: q9Jx0l3pY8u2cVt1kQe7nR4sW6zB5mH0aD3fG8jK2Lc=
+        serverPublicKey: { $ref: '#/components/schemas/PublicKey' }
         expiresAt: { $ref: '#/components/schemas/Timestamp' }
 
     Profile:

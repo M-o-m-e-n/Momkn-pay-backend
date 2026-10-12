@@ -13,6 +13,7 @@ import com.momknpay.common.web.Headers;
 import com.momknpay.session.service.SessionService;
 import com.momknpay.support.Payloads;
 import com.momknpay.support.PaymentClient;
+import com.momknpay.support.TestSessions;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -46,7 +47,7 @@ class ConfirmIT {
 
     @BeforeEach
     void openSession() {
-        mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
+        mina = new PaymentClient(mvc, "usr_01", TestSessions.open(sessionService, "usr_01"));
     }
 
     @Test
@@ -146,7 +147,8 @@ class ConfirmIT {
     @Test
     void unknownOrForeignInquiryIsNotFound() throws Exception {
         String minasInquiry = mina.openInquiry("svc_elec_cairo", "1024750891");
-        PaymentClient sara = new PaymentClient(mvc, "usr_02", sessionService.create("usr_02"));
+        PaymentClient sara =
+                new PaymentClient(mvc, "usr_02", TestSessions.open(sessionService, "usr_02"));
 
         mina.confirm("inq_0000000000000000", UUID.randomUUID(), "1234")
                 .andExpect(status().isNotFound())

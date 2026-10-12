@@ -8,6 +8,7 @@ import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.session.service.SessionService;
 import com.momknpay.support.Payloads;
 import com.momknpay.support.PaymentClient;
+import com.momknpay.support.TestSessions;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -132,7 +133,7 @@ class ConfirmFailuresIT {
     }
 
     private PaymentClient client(String userId) {
-        return new PaymentClient(mvc, userId, sessionService.create(userId));
+        return new PaymentClient(mvc, userId, TestSessions.open(sessionService, userId));
     }
 
     private String inquiryColumn(String inquiryId, String column) {

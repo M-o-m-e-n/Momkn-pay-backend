@@ -7,6 +7,7 @@ import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.session.service.SessionService;
 import com.momknpay.support.Payloads;
 import com.momknpay.support.PaymentClient;
+import com.momknpay.support.TestSessions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +42,8 @@ class ConcurrencyIT {
 
     @Test
     void tenParallelRetriesOfOneRequestCreateOneTransaction() throws Exception {
-        PaymentClient mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
+        PaymentClient mina =
+                new PaymentClient(mvc, "usr_01", TestSessions.open(sessionService, "usr_01"));
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750891");
         UUID key = UUID.randomUUID();
         String payload = Payloads.confirm(mina.sessionKey(), "1234"); // identical bytes
@@ -60,7 +62,8 @@ class ConcurrencyIT {
 
     @Test
     void twoDifferentKeysOnOneInquiryPayOnce() throws Exception {
-        PaymentClient mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
+        PaymentClient mina =
+                new PaymentClient(mvc, "usr_01", TestSessions.open(sessionService, "usr_01"));
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750892");
 
         List<MockHttpServletResponse> responses =

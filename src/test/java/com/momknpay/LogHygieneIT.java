@@ -7,10 +7,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.common.web.Headers;
-import com.momknpay.session.web.dto.CreateSessionResponse;
 import com.momknpay.support.Payloads;
 import com.momknpay.support.PaymentClient;
-import java.time.Instant;
+import com.momknpay.support.TestSession;
+import com.momknpay.support.TestSessions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -46,20 +46,8 @@ class LogHygieneIT {
     void noSecretEverReachesTheLogs(CapturedOutput output) throws Exception {
         List<String> secrets = new ArrayList<>();
 
-        // session over HTTP: the key is in the response body only
-        String sessionBody =
-                mvc.perform(
-                                withClientHeaders(post("/v1/sessions"))
-                                        .header(Headers.USER_ID, "usr_03"))
-                        .andExpect(status().isCreated())
-                        .andReturn()
-                        .getResponse()
-                        .getContentAsString();
-        CreateSessionResponse session =
-                new CreateSessionResponse(
-                        JsonPath.read(sessionBody, "$.sessionId"),
-                        JsonPath.read(sessionBody, "$.sessionKey"),
-                        Instant.parse(JsonPath.read(sessionBody, "$.expiresAt")));
+        // session over HTTP: no key is in the response, the client derives it
+        TestSession session = TestSessions.open(mvc, "usr_03");
         secrets.add(session.sessionKey());
         PaymentClient omar = new PaymentClient(mvc, "usr_03", session);
 

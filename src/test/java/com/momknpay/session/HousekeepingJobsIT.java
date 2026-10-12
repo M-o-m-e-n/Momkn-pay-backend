@@ -6,8 +6,9 @@ import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.session.service.NonceCleanupJob;
 import com.momknpay.session.service.SessionCleanupJob;
 import com.momknpay.session.service.SessionService;
-import com.momknpay.session.web.dto.CreateSessionResponse;
 import com.momknpay.support.PaymentClient;
+import com.momknpay.support.TestSession;
+import com.momknpay.support.TestSessions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,7 +31,7 @@ class HousekeepingJobsIT {
 
     @Test
     void noncesOlderThanTheRetentionAreForgotten() throws Exception {
-        CreateSessionResponse session = sessionService.create("usr_01");
+        TestSession session = TestSessions.open(sessionService, "usr_01");
         new PaymentClient(mvc, "usr_01", session).openInquiry("svc_elec_cairo", "1024750891");
         String nonce = nonceOf(session.sessionId());
 
@@ -46,7 +47,7 @@ class HousekeepingJobsIT {
 
     @Test
     void sessionsExpiredForADayAreDeletedButTheirInquiriesStay() throws Exception {
-        CreateSessionResponse session = sessionService.create("usr_01");
+        TestSession session = TestSessions.open(sessionService, "usr_01");
         String inquiryId =
                 new PaymentClient(mvc, "usr_01", session)
                         .openInquiry("svc_elec_cairo", "1024750891");
@@ -80,7 +81,7 @@ class HousekeepingJobsIT {
 
     @Test
     void recentlyExpiredSessionsAreKept() {
-        CreateSessionResponse session = sessionService.create("usr_01");
+        TestSession session = TestSessions.open(sessionService, "usr_01");
         jdbc.update(
                 "UPDATE sessions SET expires_at = now() - interval '1 hour' WHERE id = ?",
                 session.sessionId());

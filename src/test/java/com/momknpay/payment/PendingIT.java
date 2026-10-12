@@ -9,6 +9,7 @@ import com.jayway.jsonpath.JsonPath;
 import com.momknpay.TestcontainersConfiguration;
 import com.momknpay.session.service.SessionService;
 import com.momknpay.support.PaymentClient;
+import com.momknpay.support.TestSessions;
 import com.momknpay.transaction.service.PendingResolver;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -39,7 +40,7 @@ class PendingIT {
 
     @BeforeEach
     void openSession() {
-        mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
+        mina = new PaymentClient(mvc, "usr_01", TestSessions.open(sessionService, "usr_01"));
     }
 
     @Test

@@ -6,7 +6,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.common.web.Headers;
-import com.momknpay.session.web.dto.CreateSessionResponse;
 import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -17,9 +16,9 @@ public final class PaymentClient {
 
     private final MockMvc mvc;
     private final String userId;
-    private final CreateSessionResponse session;
+    private final TestSession session;
 
-    public PaymentClient(MockMvc mvc, String userId, CreateSessionResponse session) {
+    public PaymentClient(MockMvc mvc, String userId, TestSession session) {
         this.mvc = mvc;
         this.userId = userId;
         this.session = session;
