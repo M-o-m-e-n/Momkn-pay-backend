@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8a0c4e6f-1b2d-4c3e-9f5a-7b6c5d4e3f21",
     "name": "Momkn Pay v1",
-    "description": "Every endpoint and every mock rule of the Momkn Pay backend (contract: docs/openapi.yaml, v3.0.0).\n\nNo authentication: set `userId` to usr_01 / usr_02 / usr_03. The payload key comes from 01 → Create session.",
+    "description": "Every endpoint and every mock rule of the Momkn Pay backend (contract: docs/openapi.yaml, v4.0.0).\n\nNo authentication: set `userId` to usr_01 / usr_02 / usr_03. The payload key is agreed with the server in 01 → Create session (ECDH P-256 + HKDF-SHA256); it is never sent.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -105,6 +105,18 @@
     {
       "key": "momknCrypto",
       "value": ""
+    },
+    {
+      "key": "serverPublicKey",
+      "value": ""
+    },
+    {
+      "key": "clientPrivateKey",
+      "value": ""
+    },
+    {
+      "key": "clientPublicKey",
+      "value": ""
     }
   ],
   "event": [
@@ -116,9 +128,9 @@
           "// fresh X-Request-Id for every request",
           "pm.collectionVariables.set('requestId', pm.variables.replaceIn('{{$guid}}'));",
           "",
-          "// AES-256-GCM helpers for encrypted payloads (source: postman/momkn-encrypt.js).",
+          "// AES-256-GCM and session-handshake helpers (source: postman/momkn-encrypt.js).",
           "// Request scripts load them with: eval(pm.collectionVariables.get('momknCrypto'));",
-          "pm.collectionVariables.set('momknCrypto', \"function momknEncrypt(keyBase64, plaintext, ivOverride) {\\n    // ---- bytes ------------------------------------------------------------------------------\\n    const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\\n    function fromBase64(text) {\\n        const clean = text.replace(/[^A-Za-z0-9+/]/g, '');\\n        const out = [];\\n        let buffer = 0, bits = 0;\\n        for (const ch of clean) {\\n            buffer = (buffer << 6) | B64.indexOf(ch);\\n            bits += 6;\\n            if (bits >= 8) {\\n                bits -= 8;\\n                out.push((buffer >> bits) & 0xff);\\n            }\\n        }\\n        return out;\\n    }\\n    function toBase64(bytes) {\\n        let out = '';\\n        for (let i = 0; i < bytes.length; i += 3) {\\n            const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);\\n            out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];\\n            out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : '=';\\n            out += i + 2 < bytes.length ? B64[n & 63] : '=';\\n        }\\n        return out;\\n    }\\n    function utf8(text) {\\n        const out = [];\\n        for (const ch of unescape(encodeURIComponent(text))) out.push(ch.charCodeAt(0));\\n        return out;\\n    }\\n    function randomBytes(n) {\\n        const out = new Array(n);\\n        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {\\n            const buf = new Uint8Array(n);\\n            crypto.getRandomValues(buf);\\n            for (let i = 0; i < n; i++) out[i] = buf[i];\\n        } else {\\n            for (let i = 0; i < n; i++) out[i] = Math.floor(Math.random() * 256);\\n        }\\n        return out;\\n    }\\n\\n    // ---- AES-256 block cipher (FIPS-197) -----------------------------------------------------\\n    const SBOX = new Array(256);\\n    (function buildSbox() {\\n        const rotl = (x, s) => ((x << s) | (x >> (8 - s))) & 0xff;\\n        let p = 1, q = 1;\\n        do {\\n            p = (p ^ (p << 1) ^ (p & 0x80 ? 0x1b : 0)) & 0xff; // p × 3\\n            q ^= q << 1; q ^= q << 2; q ^= q << 4; q &= 0xff;   // q ÷ 3\\n            if (q & 0x80) q ^= 0x09;\\n            SBOX[p] = (q ^ rotl(q, 1) ^ rotl(q, 2) ^ rotl(q, 3) ^ rotl(q, 4) ^ 0x63) & 0xff;\\n        } while (p !== 1);\\n        SBOX[0] = 0x63;\\n    })();\\n    const xtime = (b) => ((b << 1) ^ (b & 0x80 ? 0x1b : 0)) & 0xff;\\n\\n    function expandKey(key) { // 32-byte key → 60 words of 4 bytes\\n        const words = [];\\n        for (let i = 0; i < 8; i++) words.push(key.slice(4 * i, 4 * i + 4));\\n        let rcon = 1;\\n        for (let i = 8; i < 60; i++) {\\n            let t = words[i - 1].slice();\\n            if (i % 8 === 0) {\\n                t = [SBOX[t[1]] ^ rcon, SBOX[t[2]], SBOX[t[3]], SBOX[t[0]]];\\n                rcon = xtime(rcon);\\n            } else if (i % 8 === 4) {\\n                t = t.map((b) => SBOX[b]);\\n            }\\n            words.push(words[i - 8].map((b, j) => b ^ t[j]));\\n        }\\n        return words;\\n    }\\n\\n    function encryptBlock(words, input) {\\n        let s = input.slice();\\n        const addRoundKey = (round) => {\\n            for (let i = 0; i < 16; i++) s[i] ^= words[round * 4 + (i >> 2)][i & 3];\\n        };\\n        const subShift = () => {\\n            const t = new Array(16);\\n            for (let c = 0; c < 4; c++) {\\n                for (let r = 0; r < 4; r++) t[r + 4 * c] = SBOX[s[r + 4 * ((c + r) % 4)]];\\n            }\\n            s = t;\\n        };\\n        const mixColumns = () => {\\n            for (let c = 0; c < 4; c++) {\\n                const a = s.slice(4 * c, 4 * c + 4);\\n                const x = a.map(xtime);\\n                s[4 * c] = x[0] ^ x[1] ^ a[1] ^ a[2] ^ a[3];\\n                s[4 * c + 1] = a[0] ^ x[1] ^ x[2] ^ a[2] ^ a[3];\\n                s[4 * c + 2] = a[0] ^ a[1] ^ x[2] ^ x[3] ^ a[3];\\n                s[4 * c + 3] = x[0] ^ a[0] ^ a[1] ^ a[2] ^ x[3];\\n            }\\n        };\\n        addRoundKey(0);\\n        for (let round = 1; round < 14; round++) {\\n            subShift();\\n            mixColumns();\\n            addRoundKey(round);\\n        }\\n        subShift();\\n        addRoundKey(14);\\n        return s;\\n    }\\n\\n    // ---- GCM (NIST SP 800-38D) ---------------------------------------------------------------\\n    function gfMultiply(x, y) {\\n        const z = new Array(16).fill(0);\\n        const v = y.slice();\\n        for (let i = 0; i < 128; i++) {\\n            if ((x[i >> 3] >> (7 - (i & 7))) & 1) for (let j = 0; j < 16; j++) z[j] ^= v[j];\\n            const lsb = v[15] & 1;\\n            for (let j = 15; j > 0; j--) v[j] = ((v[j] >> 1) | ((v[j - 1] & 1) << 7)) & 0xff;\\n            v[0] >>= 1;\\n            if (lsb) v[0] ^= 0xe1;\\n        }\\n        return z;\\n    }\\n    function increment32(counter) {\\n        const out = counter.slice();\\n        for (let i = 15; i >= 12; i--) {\\n            out[i] = (out[i] + 1) & 0xff;\\n            if (out[i] !== 0) break;\\n        }\\n        return out;\\n    }\\n\\n    const key = fromBase64(keyBase64);\\n    if (key.length !== 32) throw new Error('sessionKey must be base64 of 32 bytes');\\n    const words = expandKey(key);\\n    const iv = ivOverride || randomBytes(12);\\n    const hashKey = encryptBlock(words, new Array(16).fill(0));\\n    const j0 = iv.concat([0, 0, 0, 1]);\\n\\n    const plain = utf8(plaintext);\\n    const cipher = [];\\n    let counter = j0;\\n    for (let offset = 0; offset < plain.length; offset += 16) {\\n        counter = increment32(counter);\\n        const stream = encryptBlock(words, counter);\\n        for (let i = 0; i < 16 && offset + i < plain.length; i++) {\\n            cipher.push(plain[offset + i] ^ stream[i]);\\n        }\\n    }\\n\\n    let ghash = new Array(16).fill(0);\\n    for (let offset = 0; offset < cipher.length; offset += 16) {\\n        const block = new Array(16).fill(0);\\n        for (let i = 0; i < 16 && offset + i < cipher.length; i++) block[i] = cipher[offset + i];\\n        ghash = gfMultiply(ghash.map((b, i) => b ^ block[i]), hashKey);\\n    }\\n    const bitLength = cipher.length * 8; // AAD length is 0\\n    const lengths = new Array(16).fill(0);\\n    for (let i = 0; i < 4; i++) lengths[15 - i] = (bitLength >>> (8 * i)) & 0xff;\\n    ghash = gfMultiply(ghash.map((b, i) => b ^ lengths[i]), hashKey);\\n    const tag = encryptBlock(words, j0).map((b, i) => b ^ ghash[i]);\\n\\n    return toBase64(iv.concat(cipher, tag));\\n}\\nfunction momknSeal(keyBase64, fields) {\\n    const bytes = [];\\n    for (let i = 0; i < 16; i++) {\\n        bytes.push(\\n            typeof crypto !== 'undefined' && crypto.getRandomValues\\n                ? crypto.getRandomValues(new Uint8Array(1))[0]\\n                : Math.floor(Math.random() * 256));\\n    }\\n    const nonce = bytes.map((b) => ('0' + b.toString(16)).slice(-2)).join('');\\n    const body = Object.assign({}, fields, { nonce: nonce, ts: Math.floor(Date.now() / 1000) });\\n    return momknEncrypt(keyBase64, JSON.stringify(body));\\n}\");"
+          "pm.collectionVariables.set('momknCrypto', \"function momknEncrypt(keyBase64, plaintext, ivOverride) {\\n    // ---- bytes ------------------------------------------------------------------------------\\n    const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\\n    function fromBase64(text) {\\n        const clean = text.replace(/[^A-Za-z0-9+/]/g, '');\\n        const out = [];\\n        let buffer = 0, bits = 0;\\n        for (const ch of clean) {\\n            buffer = (buffer << 6) | B64.indexOf(ch);\\n            bits += 6;\\n            if (bits >= 8) {\\n                bits -= 8;\\n                out.push((buffer >> bits) & 0xff);\\n            }\\n        }\\n        return out;\\n    }\\n    function toBase64(bytes) {\\n        let out = '';\\n        for (let i = 0; i < bytes.length; i += 3) {\\n            const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);\\n            out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];\\n            out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : '=';\\n            out += i + 2 < bytes.length ? B64[n & 63] : '=';\\n        }\\n        return out;\\n    }\\n    function utf8(text) {\\n        const out = [];\\n        for (const ch of unescape(encodeURIComponent(text))) out.push(ch.charCodeAt(0));\\n        return out;\\n    }\\n    function randomBytes(n) {\\n        const out = new Array(n);\\n        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {\\n            const buf = new Uint8Array(n);\\n            crypto.getRandomValues(buf);\\n            for (let i = 0; i < n; i++) out[i] = buf[i];\\n        } else {\\n            for (let i = 0; i < n; i++) out[i] = Math.floor(Math.random() * 256);\\n        }\\n        return out;\\n    }\\n\\n    // ---- AES-256 block cipher (FIPS-197) -----------------------------------------------------\\n    const SBOX = new Array(256);\\n    (function buildSbox() {\\n        const rotl = (x, s) => ((x << s) | (x >> (8 - s))) & 0xff;\\n        let p = 1, q = 1;\\n        do {\\n            p = (p ^ (p << 1) ^ (p & 0x80 ? 0x1b : 0)) & 0xff; // p × 3\\n            q ^= q << 1; q ^= q << 2; q ^= q << 4; q &= 0xff;   // q ÷ 3\\n            if (q & 0x80) q ^= 0x09;\\n            SBOX[p] = (q ^ rotl(q, 1) ^ rotl(q, 2) ^ rotl(q, 3) ^ rotl(q, 4) ^ 0x63) & 0xff;\\n        } while (p !== 1);\\n        SBOX[0] = 0x63;\\n    })();\\n    const xtime = (b) => ((b << 1) ^ (b & 0x80 ? 0x1b : 0)) & 0xff;\\n\\n    function expandKey(key) { // 32-byte key → 60 words of 4 bytes\\n        const words = [];\\n        for (let i = 0; i < 8; i++) words.push(key.slice(4 * i, 4 * i + 4));\\n        let rcon = 1;\\n        for (let i = 8; i < 60; i++) {\\n            let t = words[i - 1].slice();\\n            if (i % 8 === 0) {\\n                t = [SBOX[t[1]] ^ rcon, SBOX[t[2]], SBOX[t[3]], SBOX[t[0]]];\\n                rcon = xtime(rcon);\\n            } else if (i % 8 === 4) {\\n                t = t.map((b) => SBOX[b]);\\n            }\\n            words.push(words[i - 8].map((b, j) => b ^ t[j]));\\n        }\\n        return words;\\n    }\\n\\n    function encryptBlock(words, input) {\\n        let s = input.slice();\\n        const addRoundKey = (round) => {\\n            for (let i = 0; i < 16; i++) s[i] ^= words[round * 4 + (i >> 2)][i & 3];\\n        };\\n        const subShift = () => {\\n            const t = new Array(16);\\n            for (let c = 0; c < 4; c++) {\\n                for (let r = 0; r < 4; r++) t[r + 4 * c] = SBOX[s[r + 4 * ((c + r) % 4)]];\\n            }\\n            s = t;\\n        };\\n        const mixColumns = () => {\\n            for (let c = 0; c < 4; c++) {\\n                const a = s.slice(4 * c, 4 * c + 4);\\n                const x = a.map(xtime);\\n                s[4 * c] = x[0] ^ x[1] ^ a[1] ^ a[2] ^ a[3];\\n                s[4 * c + 1] = a[0] ^ x[1] ^ x[2] ^ a[2] ^ a[3];\\n                s[4 * c + 2] = a[0] ^ a[1] ^ x[2] ^ x[3] ^ a[3];\\n                s[4 * c + 3] = x[0] ^ a[0] ^ a[1] ^ a[2] ^ x[3];\\n            }\\n        };\\n        addRoundKey(0);\\n        for (let round = 1; round < 14; round++) {\\n            subShift();\\n            mixColumns();\\n            addRoundKey(round);\\n        }\\n        subShift();\\n        addRoundKey(14);\\n        return s;\\n    }\\n\\n    // ---- GCM (NIST SP 800-38D) ---------------------------------------------------------------\\n    function gfMultiply(x, y) {\\n        const z = new Array(16).fill(0);\\n        const v = y.slice();\\n        for (let i = 0; i < 128; i++) {\\n            if ((x[i >> 3] >> (7 - (i & 7))) & 1) for (let j = 0; j < 16; j++) z[j] ^= v[j];\\n            const lsb = v[15] & 1;\\n            for (let j = 15; j > 0; j--) v[j] = ((v[j] >> 1) | ((v[j - 1] & 1) << 7)) & 0xff;\\n            v[0] >>= 1;\\n            if (lsb) v[0] ^= 0xe1;\\n        }\\n        return z;\\n    }\\n    function increment32(counter) {\\n        const out = counter.slice();\\n        for (let i = 15; i >= 12; i--) {\\n            out[i] = (out[i] + 1) & 0xff;\\n            if (out[i] !== 0) break;\\n        }\\n        return out;\\n    }\\n\\n    const key = fromBase64(keyBase64);\\n    if (key.length !== 32) throw new Error('sessionKey must be base64 of 32 bytes');\\n    const words = expandKey(key);\\n    const iv = ivOverride || randomBytes(12);\\n    const hashKey = encryptBlock(words, new Array(16).fill(0));\\n    const j0 = iv.concat([0, 0, 0, 1]);\\n\\n    const plain = utf8(plaintext);\\n    const cipher = [];\\n    let counter = j0;\\n    for (let offset = 0; offset < plain.length; offset += 16) {\\n        counter = increment32(counter);\\n        const stream = encryptBlock(words, counter);\\n        for (let i = 0; i < 16 && offset + i < plain.length; i++) {\\n            cipher.push(plain[offset + i] ^ stream[i]);\\n        }\\n    }\\n\\n    let ghash = new Array(16).fill(0);\\n    for (let offset = 0; offset < cipher.length; offset += 16) {\\n        const block = new Array(16).fill(0);\\n        for (let i = 0; i < 16 && offset + i < cipher.length; i++) block[i] = cipher[offset + i];\\n        ghash = gfMultiply(ghash.map((b, i) => b ^ block[i]), hashKey);\\n    }\\n    const bitLength = cipher.length * 8; // AAD length is 0\\n    const lengths = new Array(16).fill(0);\\n    for (let i = 0; i < 4; i++) lengths[15 - i] = (bitLength >>> (8 * i)) & 0xff;\\n    ghash = gfMultiply(ghash.map((b, i) => b ^ lengths[i]), hashKey);\\n    const tag = encryptBlock(words, j0).map((b, i) => b ^ ghash[i]);\\n\\n    return toBase64(iv.concat(cipher, tag));\\n}\\nfunction momknSeal(keyBase64, fields) {\\n    const bytes = [];\\n    for (let i = 0; i < 16; i++) {\\n        bytes.push(\\n            typeof crypto !== 'undefined' && crypto.getRandomValues\\n                ? crypto.getRandomValues(new Uint8Array(1))[0]\\n                : Math.floor(Math.random() * 256));\\n    }\\n    const nonce = bytes.map((b) => ('0' + b.toString(16)).slice(-2)).join('');\\n    const body = Object.assign({}, fields, { nonce: nonce, ts: Math.floor(Date.now() / 1000) });\\n    return momknEncrypt(keyBase64, JSON.stringify(body));\\n}\\nfunction momknHandshake() {\\n    // ---- P-256 --------------------------------------------------------------------------------\\n    const P = BigInt('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff');\\n    const N = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');\\n    const B = BigInt('0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b');\\n    const G = {\\n        x: BigInt('0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296'),\\n        y: BigInt('0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5'),\\n    };\\n    const ZERO = BigInt(0);\\n    const ONE = BigInt(1);\\n    const TWO = BigInt(2);\\n    const THREE = BigInt(3);\\n    // DER header of a P-256 SubjectPublicKeyInfo; the uncompressed point 04 ‖ X ‖ Y follows\\n    const SPKI_PREFIX = '3059301306072a8648ce3d020106082a8648ce3d030107034200';\\n\\n    function mod(a) {\\n        const r = a % P;\\n        return r >= ZERO ? r : r + P;\\n    }\\n    function inverse(a) { // extended Euclid, modulo P\\n        let oldR = mod(a);\\n        let r = P;\\n        let oldS = ONE;\\n        let s = ZERO;\\n        while (r !== ZERO) {\\n            const q = oldR / r;\\n            const nextR = oldR - q * r;\\n            oldR = r;\\n            r = nextR;\\n            const nextS = oldS - q * s;\\n            oldS = s;\\n            s = nextS;\\n        }\\n        return mod(oldS);\\n    }\\n    function add(p, q) { // affine coordinates; null is the point at infinity\\n        if (!p) return q;\\n        if (!q) return p;\\n        let slope;\\n        if (p.x === q.x) {\\n            if (mod(p.y + q.y) === ZERO) return null;\\n            slope = mod((THREE * p.x * p.x - THREE) * inverse(TWO * p.y)); // curve a = -3\\n        } else {\\n            slope = mod((q.y - p.y) * inverse(q.x - p.x));\\n        }\\n        const x = mod(slope * slope - p.x - q.x);\\n        return { x: x, y: mod(slope * (p.x - x) - p.y) };\\n    }\\n    function multiply(scalar, point) { // double-and-add\\n        let result = null;\\n        let addend = point;\\n        let k = scalar;\\n        while (k > ZERO) {\\n            if ((k & ONE) === ONE) result = add(result, addend);\\n            addend = add(addend, addend);\\n            k >>= ONE;\\n        }\\n        return result;\\n    }\\n    function isOnCurve(point) {\\n        return mod(point.y * point.y) === mod(point.x * point.x * point.x - THREE * point.x + B);\\n    }\\n\\n    // ---- bytes --------------------------------------------------------------------------------\\n    const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\\n    function fromBase64(text) {\\n        const clean = text.replace(/=+$/, '');\\n        const out = [];\\n        let bits = 0;\\n        let value = 0;\\n        for (let i = 0; i < clean.length; i++) {\\n            const index = B64.indexOf(clean[i]);\\n            if (index < 0) throw new Error('invalid base64');\\n            value = (value << 6) | index;\\n            bits += 6;\\n            if (bits >= 8) {\\n                bits -= 8;\\n                out.push((value >> bits) & 0xff);\\n            }\\n        }\\n        return out;\\n    }\\n    function toBase64(bytes) {\\n        let out = '';\\n        for (let i = 0; i < bytes.length; i += 3) {\\n            const a = bytes[i];\\n            const b = i + 1 < bytes.length ? bytes[i + 1] : 0;\\n            const c = i + 2 < bytes.length ? bytes[i + 2] : 0;\\n            out += B64[a >> 2] + B64[((a & 3) << 4) | (b >> 4)];\\n            out += i + 1 < bytes.length ? B64[((b & 15) << 2) | (c >> 6)] : '=';\\n            out += i + 2 < bytes.length ? B64[c & 63] : '=';\\n        }\\n        return out;\\n    }\\n    function toHex(bytes) {\\n        return bytes.map((b) => ('0' + b.toString(16)).slice(-2)).join('');\\n    }\\n    function fromHex(hex) {\\n        const out = [];\\n        for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.substr(i, 2), 16));\\n        return out;\\n    }\\n    function to32Bytes(value) {\\n        return fromHex(('0'.repeat(64) + value.toString(16)).slice(-64));\\n    }\\n    function ascii(text) {\\n        const out = [];\\n        for (let i = 0; i < text.length; i++) out.push(text.charCodeAt(i) & 0xff);\\n        return out;\\n    }\\n    function randomBytes(n) {\\n        const out = new Array(n);\\n        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {\\n            const buf = new Uint8Array(n);\\n            crypto.getRandomValues(buf);\\n            for (let i = 0; i < n; i++) out[i] = buf[i];\\n        } else {\\n            for (let i = 0; i < n; i++) out[i] = Math.floor(Math.random() * 256);\\n        }\\n        return out;\\n    }\\n\\n    // ---- public keys --------------------------------------------------------------------------\\n    function encodePublicKey(point) {\\n        return toBase64(fromHex(SPKI_PREFIX + '04').concat(to32Bytes(point.x), to32Bytes(point.y)));\\n    }\\n    function decodePublicKey(spkiBase64) {\\n        const hex = toHex(fromBase64(spkiBase64));\\n        if (hex.length !== 182 || hex.indexOf(SPKI_PREFIX + '04') !== 0) {\\n            throw new Error('not a P-256 public key (SubjectPublicKeyInfo, uncompressed point)');\\n        }\\n        const point = {\\n            x: BigInt('0x' + hex.substr(54, 64)),\\n            y: BigInt('0x' + hex.substr(118, 64)),\\n        };\\n        if (point.x >= P || point.y >= P || !isOnCurve(point)) throw new Error('point is not on P-256');\\n        return point;\\n    }\\n\\n    // ---- SHA-256, HMAC, HKDF (FIPS 180-4, RFC 2104, RFC 5869) -----------------------------------\\n    const K = [];\\n    const H0 = [];\\n    (function buildConstants() { // fractional parts of the cube / square roots of the first primes\\n        const isPrime = (n) => {\\n            for (let d = 2; d * d <= n; d++) if (n % d === 0) return false;\\n            return true;\\n        };\\n        const fraction = (x) => Math.floor((x - Math.floor(x)) * 4294967296);\\n        for (let candidate = 2; K.length < 64; candidate++) {\\n            if (!isPrime(candidate)) continue;\\n            if (H0.length < 8) H0.push(fraction(Math.sqrt(candidate)));\\n            K.push(fraction(Math.cbrt(candidate)));\\n        }\\n    })();\\n    function sha256(bytes) {\\n        const message = bytes.slice();\\n        const bitLength = bytes.length * 8;\\n        message.push(0x80);\\n        while (message.length % 64 !== 56) message.push(0);\\n        const high = Math.floor(bitLength / 4294967296);\\n        const low = bitLength >>> 0;\\n        message.push(high >>> 24, (high >>> 16) & 255, (high >>> 8) & 255, high & 255);\\n        message.push(low >>> 24, (low >>> 16) & 255, (low >>> 8) & 255, low & 255);\\n\\n        const rotate = (x, n) => (x >>> n) | (x << (32 - n));\\n        const h = H0.slice();\\n        const w = new Array(64);\\n        for (let offset = 0; offset < message.length; offset += 64) {\\n            for (let i = 0; i < 16; i++) {\\n                const j = offset + i * 4;\\n                w[i] = ((message[j] << 24) | (message[j + 1] << 16) | (message[j + 2] << 8) | message[j + 3]) >>> 0;\\n            }\\n            for (let i = 16; i < 64; i++) {\\n                const s0 = rotate(w[i - 15], 7) ^ rotate(w[i - 15], 18) ^ (w[i - 15] >>> 3);\\n                const s1 = rotate(w[i - 2], 17) ^ rotate(w[i - 2], 19) ^ (w[i - 2] >>> 10);\\n                w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;\\n            }\\n            let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];\\n            for (let i = 0; i < 64; i++) {\\n                const s1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);\\n                const t1 = (hh + s1 + ((e & f) ^ (~e & g)) + K[i] + w[i]) >>> 0;\\n                const s0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);\\n                const t2 = (s0 + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;\\n                hh = g; g = f; f = e; e = (d + t1) >>> 0;\\n                d = c; c = b; b = a; a = (t1 + t2) >>> 0;\\n            }\\n            h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0; h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;\\n            h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0; h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + hh) >>> 0;\\n        }\\n        const out = [];\\n        for (let i = 0; i < 8; i++) out.push(h[i] >>> 24, (h[i] >>> 16) & 255, (h[i] >>> 8) & 255, h[i] & 255);\\n        return out;\\n    }\\n    function hmac(key, data) {\\n        let block = key.length > 64 ? sha256(key) : key.slice();\\n        while (block.length < 64) block.push(0);\\n        const inner = block.map((b) => b ^ 0x36);\\n        const outer = block.map((b) => b ^ 0x5c);\\n        return sha256(outer.concat(sha256(inner.concat(data))));\\n    }\\n    function hkdf(keyMaterial, salt, info, length) {\\n        const pseudoRandomKey = hmac(salt.length ? salt : new Array(32).fill(0), keyMaterial);\\n        let block = [];\\n        let out = [];\\n        for (let counter = 1; out.length < length; counter++) {\\n            block = hmac(pseudoRandomKey, block.concat(info, [counter]));\\n            out = out.concat(block);\\n        }\\n        return out.slice(0, length);\\n    }\\n\\n    // ---- the handshake --------------------------------------------------------------------------\\n    function sharedSecret(privateKeyHex, publicKeyBase64) {\\n        return to32Bytes(multiply(BigInt('0x' + privateKeyHex), decodePublicKey(publicKeyBase64)).x);\\n    }\\n    return {\\n        /** A fresh key pair for one session: { privateKey (hex), publicKey (base64 SPKI) }. */\\n        generateKeyPair: function (privateKeyOverride) {\\n            let scalar;\\n            do {\\n                scalar = BigInt('0x' + toHex(privateKeyOverride || randomBytes(32))) % N;\\n            } while (scalar === ZERO);\\n            return { privateKey: toHex(to32Bytes(scalar)), publicKey: encodePublicKey(multiply(scalar, G)) };\\n        },\\n        /** base64 of the 32-byte session key; the same value the server derives. */\\n        deriveSessionKey: function (privateKeyHex, clientPublicKey, serverStaticKey, serverEphemeralKey, sessionId, userId) {\\n            const keyMaterial = sharedSecret(privateKeyHex, serverStaticKey)\\n                .concat(sharedSecret(privateKeyHex, serverEphemeralKey));\\n            const info = ['momknpay/v4/session', sessionId, userId, clientPublicKey, serverEphemeralKey].join('|');\\n            return toBase64(hkdf(keyMaterial, [], ascii(info), 32));\\n        },\\n        hkdf: hkdf, // exposed for scripts/verify-postman-crypto.js\\n    };\\n}\");"
         ]
       }
     }
@@ -126,8 +138,56 @@
   "item": [
     {
       "name": "00 Setup",
-      "description": "1. Certificate: every request verifies the server certificate (strictSSL). Trust ours once: Postman → Settings → Certificates → CA certificates → select certs/cert.pem. With Newman: --ssl-extra-ca-certs certs/cert.pem.\n2. Set userId, then run 01 → Create session first: it stores the session id and key that the payment requests use.",
-      "item": []
+      "description": "1. Certificate: every request verifies the server certificate (strictSSL). Trust ours once: Postman → Settings → Certificates → CA certificates → select certs/cert.pem. With Newman: --ssl-extra-ca-certs certs/cert.pem.\n2. Run \"Get server public key\" once: it stores the server's long-term handshake key.\n3. Set userId, then run 01 → Create session: Postman sends a fresh public key and derives the session key itself. The key is never in a request or a response.",
+      "item": [
+        {
+          "name": "Get server public key",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/public-key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                "public-key"
+              ]
+            },
+            "description": "The server's long-term handshake key. It is not a secret. The apps are built with it; Postman fetches it here once."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('P-256 key', () => pm.expect(pm.response.json().algorithm).to.eql('ECDH-P256'));",
+                  "pm.collectionVariables.set('serverPublicKey', pm.response.json().publicKey);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "strictSSL": true
+          }
+        }
+      ]
     },
     {
       "name": "01 Sessions",
@@ -152,6 +212,10 @@
               {
                 "key": "X-User-Id",
                 "value": "{{userId}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "url": {
@@ -163,18 +227,42 @@
                 "sessions"
               ]
             },
-            "description": "Stores sessionId and sessionKey in collection variables for the payment folders."
+            "description": "Stores sessionId and sessionKey in collection variables for the payment folders.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"clientPublicKey\":\"{{clientPublicKey}}\"}"
+            }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// a fresh key pair for this session; only the public key is sent",
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const pair = momknHandshake().generateKeyPair();",
+                  "pm.collectionVariables.set('clientPrivateKey', pair.privateKey);",
+                  "pm.collectionVariables.set('clientPublicKey', pair.publicKey);"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "// the response has no key: derive it from our private key and the server's two public keys",
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const momknSessionKey = () => momknHandshake().deriveSessionKey(",
+                  "    pm.collectionVariables.get('clientPrivateKey'), pm.collectionVariables.get('clientPublicKey'),",
+                  "    pm.collectionVariables.get('serverPublicKey'), pm.response.json().serverPublicKey,",
+                  "    pm.response.json().sessionId, pm.variables.replaceIn(pm.request.headers.get('X-User-Id')));",
+                  "pm.test('no key in the response', () => pm.expect(pm.response.json()).to.not.have.property('sessionKey'));",
                   "const body = pm.response.json();",
                   "pm.collectionVariables.set('sessionId', body.sessionId);",
-                  "pm.collectionVariables.set('sessionKey', body.sessionKey);"
+                  "pm.collectionVariables.set('sessionKey', momknSessionKey());"
                 ]
               }
             }
@@ -643,6 +731,10 @@
               {
                 "key": "X-User-Id",
                 "value": "usr_01"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "url": {
@@ -653,17 +745,41 @@
               "path": [
                 "sessions"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"clientPublicKey\":\"{{clientPublicKey}}\"}"
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// a fresh key pair for this session; only the public key is sent",
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const pair = momknHandshake().generateKeyPair();",
+                  "pm.collectionVariables.set('clientPrivateKey', pair.privateKey);",
+                  "pm.collectionVariables.set('clientPublicKey', pair.publicKey);"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "// the response has no key: derive it from our private key and the server's two public keys",
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const momknSessionKey = () => momknHandshake().deriveSessionKey(",
+                  "    pm.collectionVariables.get('clientPrivateKey'), pm.collectionVariables.get('clientPublicKey'),",
+                  "    pm.collectionVariables.get('serverPublicKey'), pm.response.json().serverPublicKey,",
+                  "    pm.response.json().sessionId, pm.variables.replaceIn(pm.request.headers.get('X-User-Id')));",
+                  "pm.test('no key in the response', () => pm.expect(pm.response.json()).to.not.have.property('sessionKey'));",
                   "pm.collectionVariables.set('sessionId_usr_01', pm.response.json().sessionId);",
-                  "pm.collectionVariables.set('sessionKey_usr_01', pm.response.json().sessionKey);"
+                  "pm.collectionVariables.set('sessionKey_usr_01', momknSessionKey());"
                 ]
               }
             }
@@ -1827,6 +1943,10 @@
               {
                 "key": "X-User-Id",
                 "value": "usr_03"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "url": {
@@ -1837,17 +1957,41 @@
               "path": [
                 "sessions"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"clientPublicKey\":\"{{clientPublicKey}}\"}"
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// a fresh key pair for this session; only the public key is sent",
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const pair = momknHandshake().generateKeyPair();",
+                  "pm.collectionVariables.set('clientPrivateKey', pair.privateKey);",
+                  "pm.collectionVariables.set('clientPublicKey', pair.publicKey);"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "// the response has no key: derive it from our private key and the server's two public keys",
+                  "eval(pm.collectionVariables.get('momknCrypto'));",
+                  "const momknSessionKey = () => momknHandshake().deriveSessionKey(",
+                  "    pm.collectionVariables.get('clientPrivateKey'), pm.collectionVariables.get('clientPublicKey'),",
+                  "    pm.collectionVariables.get('serverPublicKey'), pm.response.json().serverPublicKey,",
+                  "    pm.response.json().sessionId, pm.variables.replaceIn(pm.request.headers.get('X-User-Id')));",
+                  "pm.test('no key in the response', () => pm.expect(pm.response.json()).to.not.have.property('sessionKey'));",
                   "pm.collectionVariables.set('sessionId_usr_03', pm.response.json().sessionId);",
-                  "pm.collectionVariables.set('sessionKey_usr_03', pm.response.json().sessionKey);"
+                  "pm.collectionVariables.set('sessionKey_usr_03', momknSessionKey());"
                 ]
               }
             }

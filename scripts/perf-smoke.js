@@ -50,6 +50,22 @@ function call(method, route, { user, session, key, body } = {}) {
     });
 }
 
+// The client side of the session handshake (ADR-013): the key is derived, never received.
+async function openSession(user, serverStaticKey) {
+    const publicKey = (base64) => crypto.createPublicKey({ key: Buffer.from(base64, 'base64'), format: 'der', type: 'spki' });
+    const client = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const clientPublicKey = client.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+    const res = await call('POST', '/sessions', { user, body: { clientPublicKey } });
+    if (res.status !== 201) throw new Error(`session for ${user}: ${res.status} ${JSON.stringify(res.body)}`);
+    const keyMaterial = Buffer.concat([
+        crypto.diffieHellman({ privateKey: client.privateKey, publicKey: publicKey(serverStaticKey) }),
+        crypto.diffieHellman({ privateKey: client.privateKey, publicKey: publicKey(res.body.serverPublicKey) }),
+    ]);
+    const info = ['momknpay/v4/session', res.body.sessionId, user, clientPublicKey, res.body.serverPublicKey].join('|');
+    const sessionKey = Buffer.from(crypto.hkdfSync('sha256', keyMaterial, Buffer.alloc(0), info, 32)).toString('base64');
+    return { sessionId: res.body.sessionId, sessionKey };
+}
+
 function seal(sessionKey, fields) {
     const body = { ...fields, nonce: crypto.randomBytes(16).toString('hex'), ts: Math.floor(Date.now() / 1000) };
     return momknEncrypt(sessionKey, JSON.stringify(body), [...crypto.randomBytes(12)]);
@@ -78,11 +94,10 @@ async function measure(name, count, concurrency, request, expectStatus) {
     // warm-up (JIT, connection pool)
     for (let i = 0; i < 30; i++) await call('GET', '/services');
 
+    const serverKey = (await call('GET', '/sessions/public-key')).body.publicKey;
     const sessions = {};
     for (const user of ['usr_01', 'usr_03']) {
-        const res = await call('POST', '/sessions', { user });
-        if (res.status !== 201) throw new Error(`session for ${user}: ${res.status}`);
-        sessions[user] = res.body;
+        sessions[user] = await openSession(user, serverKey);
     }
     const mina = sessions.usr_01;
 

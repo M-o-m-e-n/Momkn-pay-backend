@@ -6,7 +6,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const collectionPath = path.join(root, 'postman', 'momknpay.postman_collection.json');
-const { momknEncrypt } = require(path.join(root, 'postman', 'momkn-encrypt.js'));
+const { momknEncrypt, momknHandshake } = require(path.join(root, 'postman', 'momkn-encrypt.js'));
 
 // Builds a payload: adds a fresh nonce (16 random bytes, hex) and ts, then encrypts.
 function momknSeal(keyBase64, fields) {
@@ -22,12 +22,12 @@ function momknSeal(keyBase64, fields) {
     return momknEncrypt(keyBase64, JSON.stringify(body));
 }
 
-const librarySource = momknEncrypt.toString() + '\n' + momknSeal.toString();
+const librarySource = [momknEncrypt, momknSeal, momknHandshake].map((f) => f.toString()).join('\n');
 const exec = [
     '// fresh X-Request-Id for every request',
     "pm.collectionVariables.set('requestId', pm.variables.replaceIn('{{$guid}}'));",
     '',
-    '// AES-256-GCM helpers for encrypted payloads (source: postman/momkn-encrypt.js).',
+    '// AES-256-GCM and session-handshake helpers (source: postman/momkn-encrypt.js).',
     '// Request scripts load them with: eval(pm.collectionVariables.get(\'momknCrypto\'));',
     'pm.collectionVariables.set(\'momknCrypto\', ' + JSON.stringify(librarySource) + ');',
 ];
