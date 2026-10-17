@@ -180,7 +180,7 @@ paths:
                     nameEn: Cairo Electricity
                     nameAr: كهرباء القاهرة
                     category: electricity
-                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    iconUrl: https://momkn.ahmedsayed.net/icons/icon-electricity-active.png
                     inputLabel: Subscriber number
                     inputPattern: '^[0-9]{10}$'
                     minAmount: 500
@@ -191,7 +191,7 @@ paths:
                     nameEn: Alexandria Electricity
                     nameAr: كهرباء الإسكندرية
                     category: electricity
-                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    iconUrl: https://momkn.ahmedsayed.net/icons/icon-electricity-inactive.png
                     inputLabel: Subscriber number
                     inputPattern: '^[0-9]{10}$'
                     minAmount: 500
@@ -231,7 +231,7 @@ paths:
                     nameEn: Cairo Electricity
                     nameAr: كهرباء القاهرة
                     category: electricity
-                    iconUrl: https://cdn.momknpay.local/icons/electricity.png
+                    iconUrl: https://momkn.ahmedsayed.net/icons/icon-electricity-active.png
                     inputLabel: Subscriber number
                     inputPattern: '^[0-9]{10}$'
                     minAmount: 500
@@ -553,7 +553,11 @@ components:
         nameEn: { type: string, example: Cairo Electricity }
         nameAr: { type: string, example: كهرباء القاهرة }
         category: { $ref: '#/components/schemas/ServiceCategory' }
-        iconUrl: { type: string, format: uri, example: 'https://cdn.momknpay.local/icons/electricity.png' }
+        iconUrl:
+          type: string
+          format: uri
+          description: 256×256 PNG served by the backend at /icons/ (no API headers needed); the grey variant when isActive is false.
+          example: 'https://momkn.ahmedsayed.net/icons/icon-electricity-active.png'
         inputLabel: { type: string, example: Subscriber number }
         inputPattern:
           type: string

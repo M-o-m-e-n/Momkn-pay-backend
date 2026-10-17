@@ -72,7 +72,9 @@ momknpay-backend/
     │           ├── V2__seed_services.sql
     │           ├── V4__seed_history.sql
     │           ├── V5__drop_sessions.sql      # contract v2.0.0 (ADR-011)
-    │           └── V6__restore_sessions.sql   # contract v3.0.0 (ADR-012): same tables and columns as V1
+    │           ├── V6__restore_sessions.sql   # contract v3.0.0 (ADR-012): same tables and columns as V1
+    │           └── V7__service_icons.sql      # icon_url → the icons below (§11.4)
+    │       static/icons/                      # service icons, served at /icons/ (§11.4)
     │       (V3__SeedUsers is a Java migration, see §11.2)
     └── test/java/com/momknpay/...  # see §12
 ```
@@ -529,7 +531,7 @@ public record UpdateProfileRequest(
       "nameEn": "Cairo Electricity",
       "nameAr": "كهرباء القاهرة",
       "category": "electricity",
-      "iconUrl": "https://cdn.momknpay.local/icons/electricity.png",
+      "iconUrl": "https://momkn.ahmedsayed.net/icons/icon-electricity-active.png",
       "inputLabel": "Subscriber number",
       "inputPattern": "^[0-9]{10}$",
       "minAmount": 500,
@@ -1227,7 +1229,7 @@ TLS_KEYSTORE_PASSWORD=change-me
 
 ### 11.1 `V2__seed_services.sql` — 24 active or inactive services, plus 1 soft-deleted
 
-Icons: `https://cdn.momknpay.local/icons/<category>.png`. The timestamps are fixed (`2026-09-18T09:00:00Z`) so the data is identical on every machine.
+The timestamps are fixed (`2026-09-18T09:00:00Z`) so the data is identical on every machine. The icon URLs seeded here (`cdn.momknpay.local`) were never hosted; `V7__service_icons.sql` replaces them (§11.4).
 
 | id | nameEn | nameAr | category | inputLabel | inputPattern | min | max | active |
 |---|---|---|---|---|---|---|---|---|
@@ -1299,6 +1301,18 @@ Six closed inquiries (`status = CONFIRMED` or `OPEN`, `session_id = NULL`, alrea
 | North Delta Electricity | 1012345673 | 12 345 | 12 915 | SUCCESS | 2026-09-10T08:30:00Z |
 
 (All totals follow §9.1. For amounts ≤ 100 000 the fee is 500 and the VAT is 70.)
+
+### 11.4 `V7__service_icons.sql` — service icons
+
+The backend serves the icons itself, from `src/main/resources/static/icons/` at `/icons/` (outside `/v1`, so no API headers are needed; `Cache-Control: max-age=86400, public`). Each category has two 256×256 PNGs: `icon-<category>-active.png` and the grey `icon-<category>-inactive.png`.
+
+```sql
+UPDATE services
+SET icon_url = 'https://momkn.ahmedsayed.net/icons/icon-' || category
+               || CASE WHEN is_active THEN '-active' ELSE '-inactive' END || '.png';
+```
+
+The `updated_at` trigger stamps every row, so clients receive the new URLs on their next `/services/sync`. The URL is absolute and names the deployed host on every machine; the icons are public and identical everywhere. A changed icon gets a new file name so the one-day cache cannot serve the old one.
 
 ---
 
