@@ -37,6 +37,12 @@ spring:
   mvc:
     problemdetails:
       enabled: false                     # the error envelope is the only error format
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          max-age: 1d                    # service icons (static/icons); a new icon gets a new file name
+          cache-public: true
   flyway:
     enabled: true
     locations: classpath:db/migration,classpath:com/momknpay/db/migration
