@@ -616,6 +616,55 @@
           "protocolProfileBehavior": {
             "strictSSL": true
           }
+        },
+        {
+          "name": "List ads",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "{{requestId}}"
+              },
+              {
+                "key": "X-Client-Platform",
+                "value": "{{platform}}"
+              },
+              {
+                "key": "X-Client-Version",
+                "value": "{{clientVersion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ads"
+              ]
+            },
+            "description": "Home-screen ads. Show imageUrl; on tap, open linkUrl (always https) in the browser."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 with https links', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const items = pm.response.json().items;",
+                  "  pm.expect(items.length).to.be.at.least(1);",
+                  "  items.forEach((ad) => pm.expect(ad.linkUrl.startsWith('https://')).to.be.true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "strictSSL": true
+          }
         }
       ]
     },
