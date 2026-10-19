@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Momkn Pay API
-  version: 3.0.0
+  version: 4.0.0
   summary: Simulated bill-payment API for the Momkn Pay internship capstone.
   description: |
     Contract shared by the backend, iOS and Android tracks. Frozen after publication:
@@ -14,7 +14,7 @@ info:
     - Money is integer **piastres** (`4550` = 45.50 EGP). Never floats.
     - Timestamps are ISO 8601 UTC with second precision (`2026-09-20T10:00:00Z`).
     - Every non-2xx response uses the `ErrorResponse` envelope. Clients switch on `error.code`.
-    - Sensitive fields (subscriber number, PIN) travel AES-256-GCM encrypted in `payload`:
+    - Sensitive fields (subscriber number, CVV) travel AES-256-GCM encrypted in `payload`:
       `base64(iv[12] ‖ ciphertext ‖ tag[16])`, key = the `sessionKey` from `POST /sessions`,
       no AAD, plaintext JSON always carries `nonce` (32 hex chars) and `ts` (unix seconds).
       The server rejects `ts` more than 120 s from server time and any reused `nonce`.
@@ -25,6 +25,7 @@ info:
     | 1.0.0 | 2026-09-30 | Initial contract (no-auth variant of the capstone brief). |
     | 2.0.0 | 2026-10-01 | **Breaking.** Sessions removed: `POST /sessions`, `DELETE /sessions/{sessionId}` and the `X-Session-Id` header are gone; payloads are encrypted with one static shared key. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` removed; inquiry no longer returns 410. (ADR-011) |
     | 3.0.0 | 2026-10-06 | **Breaking.** Sessions restored as in 1.0.0: `POST /sessions` issues a 30-minute AES-256 key, `DELETE /sessions/{sessionId}` revokes it, and inquiry and confirm require the `X-Session-Id` header. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` are back; the static shared key of 2.0.0 is gone. (ADR-012) |
+    | 4.0.0 | 2026-10-19 | **Breaking.** Payments are confirmed with a 3-digit CVV instead of the 4-digit CVV: the confirm payload is `{cvv, nonce, ts}` (`cvv` matches `^[0-9]{3}$`), and a wrong or malformed CVV is `VALIDATION_ERROR` with `field: "cvv"`. Three wrong CVVs still invalidate the inquiry. (ADR-014) |
 # Deliberately public: no security schemes (ADR-001).
 security: []
 servers:
@@ -299,13 +300,13 @@ paths:
     post:
       tags: [Payments]
       operationId: confirmPayment
-      summary: Pay an open inquiry with the PIN (encrypted, idempotent)
+      summary: Pay an open inquiry with the CVV (encrypted, idempotent)
       description: |
         `payload` decrypts to `ConfirmPayload`. The server checks `Idempotency-Key` **before**
         decrypting: a repeated key returns the same transaction (with its current status) and
         never creates a second one — the retry may resend the exact same bytes.
 
-        Wrong PIN → `VALIDATION_ERROR` with `field: "pin"`; the third wrong PIN on an inquiry
+        Wrong CVV → `VALIDATION_ERROR` with `field: "cvv"`; the third wrong CVV on an inquiry
         invalidates it (`INQUIRY_INVALIDATED` afterwards). Rate-limited to 5 per minute per user.
         A declined payment is recorded as a `FAILED` transaction and returned as
         `INSUFFICIENT_BALANCE`; the inquiry stays open for a retry with a new key.
@@ -635,10 +636,10 @@ components:
         payload: { $ref: '#/components/schemas/EncryptedPayload' }
     ConfirmPayload:
       type: object
-      description: Plaintext inside `ConfirmRequest.payload`. The PIN is never stored or logged.
-      required: [pin, nonce, ts]
+      description: Plaintext inside `ConfirmRequest.payload`. The CVV is never stored or logged.
+      required: [cvv, nonce, ts]
       properties:
-        pin: { type: string, pattern: '^[0-9]{4}$', example: '1234' }
+        cvv: { type: string, pattern: '^[0-9]{3}$', example: '123' }
         nonce: { type: string, pattern: '^[0-9a-f]{32}$', example: 0a1b2c3d4e5f60718293a4b5c6d7e8f9 }
         ts: { type: integer, format: int64, example: 1790000060 }
     TransactionStatus:
@@ -759,7 +760,7 @@ components:
       description: |
         | Code | HTTP | Meaning |
         |---|---|---|
-        | VALIDATION_ERROR | 400 | Bad input; `field` names the key (body property, query param, header, or `pin`) |
+        | VALIDATION_ERROR | 400 | Bad input; `field` names the key (body property, query param, header, or `cvv`) |
         | DECRYPTION_FAILED | 400 | Bad blob, wrong key, tampered, stale `ts` or replayed `nonce` |
         | INSUFFICIENT_BALANCE | 402 | Simulated decline (last digit 7) |
         | USER_NOT_FOUND | 404 | Unknown `X-User-Id` |
@@ -776,7 +777,7 @@ components:
         | INQUIRY_ALREADY_CONFIRMED | 409 | Inquiry already has a successful or pending transaction |
         | SESSION_EXPIRED | 410 | Session past `expiresAt` — create a new one |
         | INQUIRY_EXPIRED | 410 | Inquiry past `expiresAt` |
-        | INQUIRY_INVALIDATED | 410 | Three wrong PINs on this inquiry |
+        | INQUIRY_INVALIDATED | 410 | Three wrong CVVs on this inquiry |
         | AMOUNT_OUT_OF_RANGE | 422 | `amountDue` outside the service's range (last digit 6) |
         | RATE_LIMITED | 429 | Too many attempts; see `Retry-After` |
         | INTERNAL_ERROR | 500 | Unexpected server error |

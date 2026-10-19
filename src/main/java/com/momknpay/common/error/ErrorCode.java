@@ -29,8 +29,8 @@ public enum ErrorCode {
     INQUIRY_EXPIRED(410, "This inquiry has expired.", "انتهت صلاحية الاستعلام."),
     INQUIRY_INVALIDATED(
             410,
-            "Too many wrong PIN attempts. Start a new inquiry.",
-            "محاولات رقم سري خاطئة كثيرة. ابدأ استعلامًا جديدًا."),
+            "Too many wrong CVV attempts. Start a new inquiry.",
+            "محاولات خاطئة كثيرة لرمز CVV. ابدأ استعلامًا جديدًا."),
     AMOUNT_OUT_OF_RANGE(
             422,
             "The amount is outside the allowed range for this service.",

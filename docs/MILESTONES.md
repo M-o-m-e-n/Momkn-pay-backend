@@ -390,6 +390,33 @@ flowchart LR
 
 ---
 
+## M8 — CVV instead of PIN (after v3.0)
+
+*(M7 is the separate key-agreement variant on branch `feature/M7-key-agreement`.)*
+
+- [ ] **M8 complete** (all slices done; both client tracks have moved to contract v4.0.0)
+
+**Goal:** a payment is confirmed with a 3-digit CVV (`123` for every test user) instead of the 4-digit PIN (ADR-014).
+**Exit demo:** both apps pay with CVV `123`, and three wrong CVVs give `INQUIRY_INVALIDATED`.
+
+- [x] **M8-S1 · CVV in the API, the code and the schema**
+  - [x] Contract v4.0.0: payload `{cvv, nonce, ts}`, `cvv` = `^[0-9]{3}$`, error `field: "cvv"`; changelog row.
+  - [x] `V8__PinToCvv` renames the PIN columns and sets every user's CVV to `123` (V1–V7 untouched).
+  - [x] Tests use the CVV; a 4-digit or 2-digit value is rejected without counting an attempt.
+  - [x] **Done when:** `./mvnw clean verify` is green and an existing v3.0.0 database upgrades in place.
+  - Refs: ADR-014, SRS FR-PAY-1…7, LLD §6.9, §9.4 and §11.5
+
+- [x] **M8-S2 · Postman, scripts and documents**
+  - [x] Collection, `perf-smoke.js`, SRS, HLD, LLD, README, coding standards, demo guide, CLAUDE.md; version 4.0.0 and CHANGELOG.
+  - [x] **Done when:** Newman passes with certificate verification on, and no living document describes the PIN as current behaviour.
+  - Refs: NFR-DOC-2, NFR-DOC-3
+
+- [ ] **M8-S3 · Roll out to the client tracks** *(manual)*
+  - [ ] Tell both client tracks about contract v4.0.0 and get their sign-off.
+  - [ ] **Done when:** both apps confirm payments with the CVV.
+
+---
+
 ## Definition of done — backend (from the brief, adapted)
 
 - [ ] Every endpoint in SRS §4.6 works against the Dockerised backend and is used by both apps *(the backend side is done and proven by Newman; the apps are the client tracks')*

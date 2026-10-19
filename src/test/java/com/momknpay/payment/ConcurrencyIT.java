@@ -44,7 +44,7 @@ class ConcurrencyIT {
         PaymentClient mina = new PaymentClient(mvc, "usr_01", sessionService.create("usr_01"));
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750891");
         UUID key = UUID.randomUUID();
-        String payload = Payloads.confirm(mina.sessionKey(), "1234"); // identical bytes
+        String payload = Payloads.confirm(mina.sessionKey(), "123"); // identical bytes
 
         List<MockHttpServletResponse> responses =
                 runTogether(10, () -> mina.confirmWithPayload(inquiryId, key, payload));
@@ -64,7 +64,7 @@ class ConcurrencyIT {
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750892");
 
         List<MockHttpServletResponse> responses =
-                runTogether(2, () -> mina.confirm(inquiryId, UUID.randomUUID(), "1234"));
+                runTogether(2, () -> mina.confirm(inquiryId, UUID.randomUUID(), "123"));
 
         List<Integer> statuses =
                 responses.stream().map(MockHttpServletResponse::getStatus).toList();

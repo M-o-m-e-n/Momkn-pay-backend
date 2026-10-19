@@ -7,7 +7,7 @@ import com.momknpay.payment.web.dto.ConfirmResponse;
 /**
  * What a confirmation produced, decided inside the database transaction and turned into an HTTP
  * result only after it committed. That is how outcomes that must both persist state and answer with
- * an error (a wrong-PIN count, a recorded decline) keep their writes.
+ * an error (a wrong-CVV count, a recorded decline) keep their writes.
  */
 record ConfirmOutcome(ConfirmResponse response, ErrorCode error, String field) {
 

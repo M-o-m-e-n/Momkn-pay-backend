@@ -46,13 +46,13 @@ class ConfirmServiceTest {
     private static final Instant NOW = Instant.parse("2026-09-20T10:00:00Z");
     private static final String USER = "usr_01";
     private static final String SESSION = "ses_1";
-    private static final String GOOD_PIN = "1234";
+    private static final String GOOD_CVV = "123";
 
     private final InquiryRepository inquiries = mock(InquiryRepository.class);
     private final TransactionRepository transactions = mock(TransactionRepository.class);
     private final UserRepository users = mock(UserRepository.class);
     private final PayloadDecryptor decryptor = mock(PayloadDecryptor.class);
-    private final PasswordEncoder pinEncoder = mock(PasswordEncoder.class);
+    private final PasswordEncoder cvvEncoder = mock(PasswordEncoder.class);
     private final TransactionTemplate tx = mock(TransactionTemplate.class);
     private final TimeProvider time = mock(TimeProvider.class);
     private final BillerService cairo = mock(BillerService.class);
@@ -63,7 +63,7 @@ class ConfirmServiceTest {
                     transactions,
                     users,
                     decryptor,
-                    pinEncoder,
+                    cvvEncoder,
                     mock(SlowServiceDelay.class),
                     new PendingResolver(transactions, time),
                     tx,
@@ -98,7 +98,7 @@ class ConfirmServiceTest {
                 .thenReturn(
                         Optional.of(
                                 new User(USER, "Mina Adel", "01000000001", "m@x.io", "hash", NOW)));
-        when(pinEncoder.matches(GOOD_PIN, "hash")).thenReturn(true);
+        when(cvvEncoder.matches(GOOD_CVV, "hash")).thenReturn(true);
         when(transactions.nextSeq()).thenReturn(5600L);
         when(transactions.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
         when(transactions.findByUserIdAndIdempotencyKey(eq(USER), any()))
@@ -109,7 +109,7 @@ class ConfirmServiceTest {
     void normalRuleSucceedsAndConfirmsTheInquiry() {
         Inquiry inquiry = inquiry(MockRule.NORMAL, 24_750, NOW.plusSeconds(60));
 
-        ConfirmResponse response = confirm(inquiry, GOOD_PIN);
+        ConfirmResponse response = confirm(inquiry, GOOD_CVV);
 
         assertThat(response.status()).isEqualTo(TransactionStatus.SUCCESS);
         assertThat(response.reference()).isEqualTo("MP-20260920-5600");
@@ -121,38 +121,40 @@ class ConfirmServiceTest {
     void expiredInquiryCannotBePaid() { // U11
         Inquiry inquiry = inquiry(MockRule.NORMAL, 24_750, NOW.minusSeconds(1));
 
-        assertFails(() -> confirm(inquiry, GOOD_PIN), ErrorCode.INQUIRY_EXPIRED, null);
+        assertFails(() -> confirm(inquiry, GOOD_CVV), ErrorCode.INQUIRY_EXPIRED, null);
         verify(decryptor, never()).decrypt(anyString(), anyString(), anyString(), any());
         verify(transactions, never()).saveAndFlush(any());
     }
 
     @Test
-    void threeWrongPinsInvalidateTheInquiry() { // U14
+    void threeWrongCvvsInvalidateTheInquiry() { // U14
         Inquiry inquiry = inquiry(MockRule.NORMAL, 24_750, NOW.plusSeconds(60));
 
         for (int attempt = 1; attempt <= 3; attempt++) {
-            assertFails(() -> confirm(inquiry, "0000"), ErrorCode.VALIDATION_ERROR, "pin");
-            assertThat(inquiry.getFailedPinAttempts()).isEqualTo(attempt);
+            assertFails(() -> confirm(inquiry, "000"), ErrorCode.VALIDATION_ERROR, "cvv");
+            assertThat(inquiry.getFailedCvvAttempts()).isEqualTo(attempt);
         }
         assertThat(inquiry.getStatus()).isEqualTo(InquiryStatus.INVALIDATED);
 
-        assertFails(() -> confirm(inquiry, GOOD_PIN), ErrorCode.INQUIRY_INVALIDATED, null);
+        assertFails(() -> confirm(inquiry, GOOD_CVV), ErrorCode.INQUIRY_INVALIDATED, null);
         verify(transactions, never()).saveAndFlush(any());
     }
 
     @Test
-    void malformedPinIsRejectedWithoutCountingAnAttempt() {
+    void malformedCvvIsRejectedWithoutCountingAnAttempt() {
         Inquiry inquiry = inquiry(MockRule.NORMAL, 24_750, NOW.plusSeconds(60));
 
-        assertFails(() -> confirm(inquiry, "12a4"), ErrorCode.VALIDATION_ERROR, "pin");
-        assertThat(inquiry.getFailedPinAttempts()).isZero();
+        assertFails(() -> confirm(inquiry, "12a"), ErrorCode.VALIDATION_ERROR, "cvv");
+        assertFails(() -> confirm(inquiry, "1234"), ErrorCode.VALIDATION_ERROR, "cvv"); // old PIN
+        assertFails(() -> confirm(inquiry, "12"), ErrorCode.VALIDATION_ERROR, "cvv");
+        assertThat(inquiry.getFailedCvvAttempts()).isZero();
     }
 
     @Test
     void largeBillIsRejectedWithoutATransaction() { // U15
         Inquiry inquiry = inquiry(MockRule.LARGE, 510_000, NOW.plusSeconds(60));
 
-        assertFails(() -> confirm(inquiry, GOOD_PIN), ErrorCode.AMOUNT_OUT_OF_RANGE, null);
+        assertFails(() -> confirm(inquiry, GOOD_CVV), ErrorCode.AMOUNT_OUT_OF_RANGE, null);
         verify(transactions, never()).saveAndFlush(any());
         assertThat(inquiry.getStatus()).isEqualTo(InquiryStatus.OPEN);
     }
@@ -161,7 +163,7 @@ class ConfirmServiceTest {
     void declineRecordsAFailedTransactionAndKeepsTheInquiryOpen() { // U16
         Inquiry inquiry = inquiry(MockRule.DECLINE, 24_750, NOW.plusSeconds(60));
 
-        assertFails(() -> confirm(inquiry, GOOD_PIN), ErrorCode.INSUFFICIENT_BALANCE, null);
+        assertFails(() -> confirm(inquiry, GOOD_CVV), ErrorCode.INSUFFICIENT_BALANCE, null);
 
         Transaction saved = savedTransaction();
         assertThat(saved.getStatus()).isEqualTo(TransactionStatus.FAILED);
@@ -174,7 +176,7 @@ class ConfirmServiceTest {
     void pendingRuleCreatesAPendingTransactionDueInTenSeconds() {
         Inquiry inquiry = inquiry(MockRule.PENDING, 24_750, NOW.plusSeconds(60));
 
-        ConfirmResponse response = confirm(inquiry, GOOD_PIN);
+        ConfirmResponse response = confirm(inquiry, GOOD_CVV);
 
         assertThat(response.status()).isEqualTo(TransactionStatus.PENDING);
         assertThat(response.paidAt()).isNull();
@@ -187,7 +189,7 @@ class ConfirmServiceTest {
         Inquiry inquiry = inquiry(MockRule.NORMAL, 24_750, NOW.plusSeconds(60));
         when(cairo.isActive()).thenReturn(false);
 
-        assertFails(() -> confirm(inquiry, GOOD_PIN), ErrorCode.SERVICE_UNAVAILABLE, null);
+        assertFails(() -> confirm(inquiry, GOOD_CVV), ErrorCode.SERVICE_UNAVAILABLE, null);
     }
 
     @Test
@@ -241,9 +243,9 @@ class ConfirmServiceTest {
         return inquiry;
     }
 
-    private ConfirmResponse confirm(Inquiry inquiry, String pin) {
+    private ConfirmResponse confirm(Inquiry inquiry, String cvv) {
         when(decryptor.decrypt(eq(SESSION), eq(USER), eq("blob"), eq(ConfirmPayload.class)))
-                .thenReturn(new ConfirmPayload(pin, "0".repeat(32), NOW.getEpochSecond()));
+                .thenReturn(new ConfirmPayload(cvv, "0".repeat(32), NOW.getEpochSecond()));
         return service.confirm(
                 USER, SESSION, UUID.randomUUID(), new ConfirmRequest(inquiry.getId(), "blob"));
     }

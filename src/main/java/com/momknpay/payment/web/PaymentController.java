@@ -65,17 +65,17 @@ class PaymentController {
     }
 
     @Operation(
-            summary = "Pay an open inquiry with the PIN (encrypted, idempotent)",
+            summary = "Pay an open inquiry with the CVV (encrypted, idempotent)",
             description =
-                    "payload decrypts to {pin, nonce, ts}. Idempotency-Key is checked before"
+                    "payload decrypts to {cvv, nonce, ts}. Idempotency-Key is checked before"
                             + " decrypting: repeating it returns the same transaction (current"
                             + " status) and never creates a second one, even when the exact same"
-                            + " bytes are resent. Wrong PIN → VALIDATION_ERROR on pin; the third"
+                            + " bytes are resent. Wrong CVV → VALIDATION_ERROR on cvv; the third"
                             + " invalidates the inquiry. Rate-limited to 5 per minute per user.")
     @ApiResponse(responseCode = "200", description = "SUCCESS or PENDING — first call and replays")
     @ApiResponse(
             responseCode = "400",
-            description = "VALIDATION_ERROR (incl. pin, Idempotency-Key) or DECRYPTION_FAILED")
+            description = "VALIDATION_ERROR (incl. cvv, Idempotency-Key) or DECRYPTION_FAILED")
     @ApiResponse(responseCode = "402", description = "INSUFFICIENT_BALANCE — simulated decline")
     @ApiResponse(
             responseCode = "404",

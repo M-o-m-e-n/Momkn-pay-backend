@@ -73,7 +73,7 @@ The rules use **MUST** (a pull request is blocked if it breaks the rule), **SHOU
 | Local variable / field | `camelCase`, no abbreviations except well-known ones (`id`, `dto`, `txn`) | `amountDue`, not `amt` |
 | Type parameter | single capital letter | `<T>` |
 | Test class | `<ClassUnderTest>Test` (unit), `<Feature>IT` (integration) | `FeeCalculatorTest`, `PaymentFlowIT` |
-| Test method | `camelCase` sentence describing behaviour | `threeWrongPinsInvalidateInquiry` |
+| Test method | `camelCase` sentence describing behaviour | `threeWrongCvvsInvalidateInquiry` |
 
 ### 3.2 Class name suffixes (by role)
 
@@ -293,13 +293,13 @@ These rules are what the security part of the grade looks for (brief: *Security 
 | A **fresh random IV for every encryption**, from `SecureRandom`. Never a constant, counter or reused IV. | MUST |
 | Randomness for keys, IVs, nonces and IDs comes only from `SecureRandom`. Never `Random` or `Math.random`. | MUST 🔧 |
 | Key byte arrays are zeroed (`Arrays.fill(key, (byte) 0)`) after use. | SHOULD |
-| Never write your own crypto primitive or hashing. PINs use `BCryptPasswordEncoder(12)`. | MUST |
+| Never write your own crypto primitive or hashing. CVVs use `BCryptPasswordEncoder(12)`. | MUST |
 
 ### 10.3 Sensitive data
 
 | Data | Store | Log | Return in API |
 |---|---|---|---|
-| PIN | bcrypt hash only | **never** | **never** |
+| CVV | bcrypt hash only | **never** | **never** |
 | Session key | wrapped with the master key only | **never** | only once, in `POST /sessions` |
 | Encrypted payload (`payload`) | **never** | **never** | **never** |
 | Decrypted payload | **never** (in memory only) | **never** | **never** |
@@ -334,7 +334,7 @@ These rules are what the security part of the grade looks for (brief: *Security 
 | Associations are `fetch = LAZY`. Load what you need explicitly (`JOIN FETCH` or an entity graph). | MUST |
 | Enums are persisted as strings (`@Enumerated(STRING)` or a converter), never ordinals. | MUST |
 | Entities do not leave the service layer. | MUST |
-| Entities have protected no-arg constructors for JPA and meaningful methods (`inquiry.registerWrongPin()`), not only setters. | SHOULD |
+| Entities have protected no-arg constructors for JPA and meaningful methods (`inquiry.registerWrongCvv()`), not only setters. | SHOULD |
 | Use `PESSIMISTIC_WRITE` (`findForUpdate`) whenever a read decides a write that must happen once (confirm). | MUST |
 | No N+1 queries in list endpoints. Check the SQL count in the integration test or with `spring.jpa.show-sql` locally (never committed as `true`). | SHOULD |
 | Native SQL only where JPQL cannot express the query (`nextval`). | SHOULD |
@@ -349,7 +349,7 @@ These rules are what the security part of the grade looks for (brief: *Security 
 | Use parameterised messages (`log.info("inquiry.created inquiryId={}", id)`), never string concatenation. | MUST 🔧 |
 | Business events use a dotted `event.name` followed by `key=value` pairs: `payment.confirmed txnId=… status=…`. | MUST |
 | Levels: `ERROR` for unexpected failures that need a human, `WARN` for suspicious but handled cases (replayed nonce, rate-limited), `INFO` for business events, `DEBUG` for development detail (off by default). | MUST |
-| Expected business errors (`SUBSCRIBER_NOT_FOUND`, wrong PIN) are **not** `ERROR`. | MUST |
+| Expected business errors (`SUBSCRIBER_NOT_FOUND`, wrong CVV) are **not** `ERROR`. | MUST |
 | Every log line carries the request ID through the MDC. Do not add it by hand. | MUST |
 | Log IDs and masked values only. Never the sensitive data in §10.3. | MUST 🔧 (`LogHygieneTest`) |
 
@@ -374,15 +374,15 @@ These rules are what the security part of the grade looks for (brief: *Security 
 
 ```java
 @Test
-void threeWrongPinsInvalidateInquiry() {
+void threeWrongCvvsInvalidateInquiry() {
     // given
     var inquiry = openInquiryFor("usr_03");
 
     // when
-    repeat(3, () -> assertApiError(confirm(inquiry, "1234"), VALIDATION_ERROR, "pin"));
+    repeat(3, () -> assertApiError(confirm(inquiry, "321"), VALIDATION_ERROR, "cvv"));
 
     // then
-    assertApiError(confirm(inquiry, "9999"), INQUIRY_INVALIDATED, null);
+    assertApiError(confirm(inquiry, "123"), INQUIRY_INVALIDATED, null);
 }
 ```
 
@@ -468,7 +468,7 @@ Copy this into the pull request template. The reviewer ticks each item or leaves
 
 **Security**
 - [ ] No secrets in code, config defaults or tests
-- [ ] No PIN, key, payload or full subscriber number in logs or `toString()`
+- [ ] No CVV, key, payload or full subscriber number in logs or `toString()`
 - [ ] Crypto only through `AesGcmCipher`, with a fresh IV
 
 **Quality**

@@ -20,7 +20,7 @@ class AesGcmCipherTest {
     @Test
     void roundTrip() {
         byte[] plaintext =
-                "{\"pin\":\"1234\",\"nonce\":\"00\",\"ts\":1}".getBytes(StandardCharsets.UTF_8);
+                "{\"cvv\":\"123\",\"nonce\":\"00\",\"ts\":1}".getBytes(StandardCharsets.UTF_8);
 
         byte[] blob = cipher.encrypt(key, plaintext, null);
 

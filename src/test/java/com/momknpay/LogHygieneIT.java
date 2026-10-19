@@ -27,7 +27,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * I10: runs every sensitive path — session, inquiry, confirm (right and wrong PIN), replay,
+ * I10: runs every sensitive path — session, inquiry, confirm (right and wrong CVV), replay,
  * malformed input, receipt — and asserts that no secret reaches the logs (NFR-SEC-6,
  * CODING_STANDARDS §10.3).
  */
@@ -38,7 +38,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class LogHygieneIT {
 
     private static final String SUBSCRIBER = "1024750891";
-    private static final Pattern PIN_IN_LOG = Pattern.compile("(?i)\"?pin\"?\\s*[:=]\\s*\"?\\d{4}");
+    private static final Pattern CVV_IN_LOG = Pattern.compile("(?i)\"?cvv\"?\\s*[:=]\\s*\"?\\d{3}");
 
     @Autowired private MockMvc mvc;
 
@@ -77,18 +77,18 @@ class LogHygieneIT {
         omar.inquire("svc_elec_cairo", inquiryPayload) // replay → DECRYPTION_FAILED path
                 .andExpect(status().isBadRequest());
 
-        // confirm: a wrong PIN, a malformed PIN, then the right one, then a byte-identical replay
-        String wrongPin = Payloads.confirm(session.sessionKey(), "1234");
-        String badPin = Payloads.confirm(session.sessionKey(), "12a4");
-        String rightPin = Payloads.confirm(session.sessionKey(), "9999");
-        secrets.addAll(List.of(wrongPin, badPin, rightPin));
-        omar.confirmWithPayload(inquiryId, UUID.randomUUID(), wrongPin)
+        // confirm: a wrong CVV, a malformed CVV, then the right one, then a byte-identical replay
+        String wrongCvv = Payloads.confirm(session.sessionKey(), "321");
+        String badCvv = Payloads.confirm(session.sessionKey(), "12a");
+        String rightCvv = Payloads.confirm(session.sessionKey(), "123");
+        secrets.addAll(List.of(wrongCvv, badCvv, rightCvv));
+        omar.confirmWithPayload(inquiryId, UUID.randomUUID(), wrongCvv)
                 .andExpect(status().isBadRequest());
-        omar.confirmWithPayload(inquiryId, UUID.randomUUID(), badPin)
+        omar.confirmWithPayload(inquiryId, UUID.randomUUID(), badCvv)
                 .andExpect(status().isBadRequest());
         UUID key = UUID.randomUUID();
-        omar.confirmWithPayload(inquiryId, key, rightPin).andExpect(status().isOk());
-        omar.confirmWithPayload(inquiryId, key, rightPin).andExpect(status().isOk());
+        omar.confirmWithPayload(inquiryId, key, rightCvv).andExpect(status().isOk());
+        omar.confirmWithPayload(inquiryId, key, rightCvv).andExpect(status().isOk());
 
         // malformed bodies: the error path must not echo input either
         mvc.perform(
@@ -101,8 +101,8 @@ class LogHygieneIT {
                                         "{\"inquiryId\":\""
                                                 + inquiryId
                                                 + "\",\"payload\":\""
-                                                + rightPin
-                                                + "\",\"pin\":\"9999\"}"))
+                                                + rightCvv
+                                                + "\",\"cvv\":\"123\"}"))
                 .andExpect(status().isBadRequest());
 
         String logs = output.getAll();
@@ -111,7 +111,7 @@ class LogHygieneIT {
         for (String secret : secrets) {
             assertThat(logs).as("a key or payload leaked into the logs").doesNotContain(secret);
         }
-        assertThat(PIN_IN_LOG.matcher(logs).find()).as("a PIN leaked into the logs").isFalse();
-        assertThat(logs).doesNotContainIgnoringCase("pin_hash").doesNotContain("$2a$12$");
+        assertThat(CVV_IN_LOG.matcher(logs).find()).as("a CVV leaked into the logs").isFalse();
+        assertThat(logs).doesNotContainIgnoringCase("cvv_hash").doesNotContain("$2a$12$");
     }
 }

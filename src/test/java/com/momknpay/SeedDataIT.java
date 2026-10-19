@@ -65,19 +65,20 @@ class SeedDataIT {
     }
 
     @Test
-    void theThreeTestUsersHaveWorkingPins() {
+    void theThreeTestUsersHaveWorkingCvvs() {
         var encoder = new BCryptPasswordEncoder();
-        Map<String, String> pinHashes =
+        Map<String, String> cvvHashes =
                 Map.of(
-                        "usr_01", pinHashOf("usr_01"),
-                        "usr_02", pinHashOf("usr_02"),
-                        "usr_03", pinHashOf("usr_03"));
+                        "usr_01", cvvHashOf("usr_01"),
+                        "usr_02", cvvHashOf("usr_02"),
+                        "usr_03", cvvHashOf("usr_03"));
 
-        assertThat(encoder.matches("1234", pinHashes.get("usr_01"))).isTrue();
-        assertThat(encoder.matches("1234", pinHashes.get("usr_02"))).isTrue();
-        assertThat(encoder.matches("9999", pinHashes.get("usr_03"))).isTrue();
-        assertThat(encoder.matches("1234", pinHashes.get("usr_03"))).isFalse();
-        assertThat(pinHashes.values()).allSatisfy(hash -> assertThat(hash).startsWith("$2a$12$"));
+        assertThat(cvvHashes.values())
+                .allSatisfy(hash -> assertThat(encoder.matches("123", hash)).isTrue());
+        // V8 replaced the old 4-digit PINs
+        assertThat(encoder.matches("1234", cvvHashes.get("usr_01"))).isFalse();
+        assertThat(encoder.matches("9999", cvvHashes.get("usr_03"))).isFalse();
+        assertThat(cvvHashes.values()).allSatisfy(hash -> assertThat(hash).startsWith("$2a$12$"));
     }
 
     @Test
@@ -88,8 +89,8 @@ class SeedDataIT {
         assertThat(mobiles).containsExactly("01000000001", "01000000002", "01000000003");
     }
 
-    private String pinHashOf(String userId) {
-        return jdbc.queryForObject("SELECT pin_hash FROM users WHERE id = ?", String.class, userId);
+    private String cvvHashOf(String userId) {
+        return jdbc.queryForObject("SELECT cvv_hash FROM users WHERE id = ?", String.class, userId);
     }
 
     @Test

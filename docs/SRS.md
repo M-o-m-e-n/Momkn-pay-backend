@@ -36,10 +36,10 @@ Momkn Pay is a **simulated** bill-payment system for Egyptian utility services: 
 
 - serves a bilingual (Arabic/English) catalogue of payable services, with delta sync for offline-first clients;
 - performs a **fees inquiry** for a subscriber number and returns an itemised, time-limited quote;
-- **confirms payments** idempotently against that quote, using a PIN;
+- **confirms payments** idempotently against that quote, using a CVV;
 - keeps a **transaction history** with receipts;
 - decides every payment outcome with a **deterministic mock payment engine**. No real money, payment service provider (PSP), card scheme or NFC is involved;
-- protects the two sensitive fields (subscriber number and PIN) with **AES-256-GCM payload encryption** on top of TLS.
+- protects the two sensitive fields (subscriber number and CVV) with **AES-256-GCM payload encryption** on top of TLS.
 
 > **This project has no authentication module. Every endpoint is public.** There is no registration, login, JWT, refresh token or logout. A caller says which user it acts for with the `X-User-Id` header (see §2.5 and §8).
 
@@ -51,7 +51,7 @@ Momkn Pay is a **simulated** bill-payment system for Egyptian utility services: 
 | **Service** | A payable biller in the catalogue, for example *Cairo Electricity*. |
 | **Subscriber number** | The customer's account number at the biller. Its format is given by the service's `inputPattern`. |
 | **Inquiry** | A server-computed quote for one subscriber at one service. It is valid for 5 minutes. |
-| **Confirm** | Paying an open inquiry with a PIN. It creates one transaction. |
+| **Confirm** | Paying an open inquiry with a CVV. It creates one transaction. |
 | **Transaction** | The record of a payment attempt, with status `SUCCESS`, `FAILED` or `PENDING`. |
 | **Idempotency key** | A client-generated UUID sent on confirm. The same key always maps to the same transaction. |
 | **Session** | A short-lived crypto context created by `POST /sessions`. It holds the AES key used to encrypt payloads. It is *not* an authentication session. |
@@ -94,7 +94,7 @@ The backend owns the API contract (OpenAPI 3.1), the database, the mock payment 
 | P2 | View and edit the user profile | Profile |
 | P3 | Full catalogue and delta sync | Catalogue |
 | P4 | Fees inquiry with encrypted subscriber number | Payments |
-| P5 | Idempotent payment confirmation with encrypted PIN | Payments |
+| P5 | Idempotent payment confirmation with encrypted CVV | Payments |
 | P6 | Transaction history and receipt | Transactions |
 | P7 | Deterministic mock outcomes | Mock engine |
 
@@ -146,7 +146,7 @@ Each requirement has acceptance criteria (AC) that a test or Postman request can
 
 ### 3.2 Sessions — encryption key issuance (FR-SES)
 
-The session replaces "session key issued at login" from the brief. It exists only to share the AES-256 key used to encrypt the subscriber number and PIN.
+The session replaces "session key issued at login" from the brief. It exists only to share the AES-256 key used to encrypt the subscriber number and CVV.
 
 | ID | Requirement |
 |---|---|
@@ -199,18 +199,18 @@ The session replaces "session key issued at login" from the brief. It exists onl
 
 | ID | Requirement |
 |---|---|
-| FR-PAY-1 | `POST /payments/confirm` MUST accept `{ inquiryId, payload }` with headers `X-User-Id`, `X-Session-Id` and **`Idempotency-Key` (UUID, required)**. `payload` decrypts to `{ pin, nonce, ts }`. |
+| FR-PAY-1 | `POST /payments/confirm` MUST accept `{ inquiryId, payload }` with headers `X-User-Id`, `X-Session-Id` and **`Idempotency-Key` (UUID, required)**. `payload` decrypts to `{ cvv, nonce, ts }`. |
 | FR-PAY-2 | **Idempotency:** if a transaction already exists for (`X-User-Id`, `Idempotency-Key`), the server MUST return that transaction, rebuilt from its current state, **without** decrypting the payload or creating a new transaction. A success or pending result returns `200`. A failed result returns the same error envelope as the first time. |
 | FR-PAY-3 | Reusing an `Idempotency-Key` with a **different** `inquiryId` gives `409 IDEMPOTENCY_CONFLICT`. |
 | FR-PAY-4 | Two concurrent requests with the same key MUST produce exactly one transaction. |
-| FR-PAY-5 | An unknown inquiry, or one that belongs to another user, gives `404 INQUIRY_NOT_FOUND`. An inquiry past `expiresAt` gives `410 INQUIRY_EXPIRED`. An inquiry invalidated by wrong PINs gives `410 INQUIRY_INVALIDATED`. An inquiry that already has a `SUCCESS` or `PENDING` transaction gives `409 INQUIRY_ALREADY_CONFIRMED`. |
-| FR-PAY-6 | The PIN MUST be exactly 4 digits and MUST be checked against the user's bcrypt PIN hash. A wrong PIN gives `400 VALIDATION_ERROR` with `field: "pin"` and increments the inquiry's failure counter. |
-| FR-PAY-7 | **Three wrong PINs in a row** on the same inquiry MUST invalidate it. Later confirms give `410 INQUIRY_INVALIDATED`. |
+| FR-PAY-5 | An unknown inquiry, or one that belongs to another user, gives `404 INQUIRY_NOT_FOUND`. An inquiry past `expiresAt` gives `410 INQUIRY_EXPIRED`. An inquiry invalidated by wrong CVVs gives `410 INQUIRY_INVALIDATED`. An inquiry that already has a `SUCCESS` or `PENDING` transaction gives `409 INQUIRY_ALREADY_CONFIRMED`. |
+| FR-PAY-6 | The CVV MUST be exactly 4 digits and MUST be checked against the user's bcrypt CVV hash. A wrong CVV gives `400 VALIDATION_ERROR` with `field: "cvv"` and increments the inquiry's failure counter. |
+| FR-PAY-7 | **Three wrong CVVs in a row** on the same inquiry MUST invalidate it. Later confirms give `410 INQUIRY_INVALIDATED`. |
 | FR-PAY-8 | If the inquiry's `amountDue` is outside the service's `[minAmount, maxAmount]` (mock rule 6), the confirm MUST be rejected with `422 AMOUNT_OUT_OF_RANGE`, and no transaction is created. |
 | FR-PAY-9 | On a mock outcome, a transaction MUST be created with a unique `transactionId`, a unique `reference` in the form `MP-YYYYMMDD-NNNN`, and all amounts. |
 | FR-PAY-10 | A success response MUST contain `transactionId`, `status`, `reference`, `paidAt`, `total` and `service { id, nameEn, nameAr }`. `paidAt` is `null` while the transaction is `PENDING`. |
 | FR-PAY-11 | `POST /payments/confirm` MUST be rate-limited to 5 requests per minute per `X-User-Id`. |
-| FR-PAY-12 | The PIN MUST never be stored or logged, in plaintext or encrypted form. |
+| FR-PAY-12 | The CVV MUST never be stored or logged, in plaintext or encrypted form. |
 
 ### 3.7 Transactions and receipts (FR-TXN)
 
@@ -272,7 +272,7 @@ Clients switch on `code`, never on the message text. `field` names the offending
 
 | Code | HTTP | Meaning |
 |---|---|---|
-| `VALIDATION_ERROR` | 400 | Bad input. `field` names the offending key (including `pin` for a wrong PIN and header names). |
+| `VALIDATION_ERROR` | 400 | Bad input. `field` names the offending key (including `cvv` for a wrong CVV and header names). |
 | `DECRYPTION_FAILED` | 400 | Bad blob, wrong key, tampered ciphertext, stale `ts` or replayed `nonce`. |
 | `INSUFFICIENT_BALANCE` | 402 | Simulated decline (mock rule 7). |
 | `USER_NOT_FOUND` | 404 | `X-User-Id` does not match a user. |
@@ -289,7 +289,7 @@ Clients switch on `code`, never on the message text. `field` names the offending
 | `INQUIRY_ALREADY_CONFIRMED` | 409 | The inquiry already has a successful or pending transaction. |
 | `SESSION_EXPIRED` | 410 | Past the session's `expiresAt`. |
 | `INQUIRY_EXPIRED` | 410 | Past the inquiry's `expiresAt`. |
-| `INQUIRY_INVALIDATED` | 410 | Three wrong PINs on this inquiry. |
+| `INQUIRY_INVALIDATED` | 410 | Three wrong CVVs on this inquiry. |
 | `AMOUNT_OUT_OF_RANGE` | 422 | `amountDue` outside the service's `[minAmount, maxAmount]` (mock rule 6). |
 | `RATE_LIMITED` | 429 | Too many attempts. See `Retry-After`. |
 | `INTERNAL_ERROR` | 500 | Unexpected server error. No details are leaked. |
@@ -330,8 +330,8 @@ Tooling endpoints (outside `/v1`, no custom headers needed): `GET /docs` (Swagge
 | NFR-SEC-2 | The server MUST reject a payload whose `ts` differs from server time by more than 120 seconds, or whose `nonce` has already been seen, with `DECRYPTION_FAILED`. |
 | NFR-SEC-3 | Seen nonces MUST be retained for at least 5 minutes (longer than the ts window, so a replay can never slip through). |
 | NFR-SEC-4 | Session keys MUST be generated with a CSPRNG (`SecureRandom`) and stored **wrapped** (AES-GCM encrypted) with a master key from the environment. They are never stored in plaintext. |
-| NFR-SEC-5 | PINs MUST be stored only as bcrypt hashes (cost ≥ 12). |
-| NFR-SEC-6 | Logs MUST never contain the PIN, session key, encrypted or decrypted payloads, or the master key. The subscriber number MUST be masked in logs (last 4 digits only). |
+| NFR-SEC-5 | CVVs MUST be stored only as bcrypt hashes (cost ≥ 12). |
+| NFR-SEC-6 | Logs MUST never contain the CVV, session key, encrypted or decrypted payloads, or the master key. The subscriber number MUST be masked in logs (last 4 digits only). |
 | NFR-SEC-7 | No secret, key or certificate private key in the repository. Configuration comes from environment variables, and `.env.example` documents them. |
 | NFR-SEC-8 | TLS is mandatory. The SPKI hash of the live key and of a backup key are published for pinning. |
 | NFR-SEC-9 | Rate limits: 5/min per user on `/sessions` and `/payments/confirm`. |
@@ -351,7 +351,7 @@ Tooling endpoints (outside `/v1`, no custom headers needed): `GET /docs` (Swagge
 
 | ID | Requirement |
 |---|---|
-| NFR-PER-1 | p95 latency < 300 ms for every endpoint on a developer laptop, except `_slow` services (by design +8 s) and `POST /payments/confirm`, whose budget is **< 500 ms** because the bcrypt cost-12 PIN check alone takes ~230 ms (NFR-SEC-5 wins; see DECISIONS.md ADR-010). |
+| NFR-PER-1 | p95 latency < 300 ms for every endpoint on a developer laptop, except `_slow` services (by design +8 s) and `POST /payments/confirm`, whose budget is **< 500 ms** because the bcrypt cost-12 CVV check alone takes ~230 ms (NFR-SEC-5 wins; see DECISIONS.md ADR-010). |
 | NFR-PER-2 | An 8-second `_slow` delay MUST NOT block other requests. Virtual threads are enabled. |
 | NFR-PER-3 | `GET /services` returns at least 24 services in one response, without pagination. |
 
@@ -419,7 +419,7 @@ total      = amountDue + serviceFee + vat
 ### 6.4 Other rules
 - `customerName` is deterministic for a subscriber number, so the same number always shows the same name.
 - `billMonth` is the calendar month before the inquiry date (UTC).
-- A wrong PIN gives `VALIDATION_ERROR` with `field: "pin"`. Three in a row on the same inquiry invalidate it.
+- A wrong CVV gives `VALIDATION_ERROR` with `field: "cvv"`. Three in a row on the same inquiry invalidate it.
 - A `FAILED` transaction (rule 7) leaves the inquiry open. The client may retry with a **new** idempotency key until the inquiry expires.
 
 ---
@@ -431,11 +431,11 @@ total      = amountDue + serviceFee + vat
 | FR-SEED-1 | At least **24 services** across all six categories, each with Arabic and English names. They MUST include at least one `_slow` service and at least one inactive service. |
 | FR-SEED-2 | Three fixed test users: |
 
-| User ID | Mobile | PIN | Purpose |
+| User ID | Mobile | CVV | Purpose |
 |---|---|---|---|
-| `usr_01` | `01000000001` | `1234` | Happy path, has transaction history |
-| `usr_02` | `01000000002` | `1234` | Fresh account, empty history |
-| `usr_03` | `01000000003` | `9999` | Any other PIN is rejected, which tests the wrong-PIN path |
+| `usr_01` | `01000000001` | `123` | Happy path, has transaction history |
+| `usr_02` | `01000000002` | `123` | Fresh account, empty history |
+| `usr_03` | `01000000003` | `123` | Used for the wrong-CVV path (send any other 3 digits) |
 
 | ID | Requirement |
 |---|---|
@@ -454,7 +454,7 @@ total      = amountDue + serviceFee + vat
 |---|---|---|---|
 | L-1 | No authentication. `X-User-Id` is trusted. | Anyone who can reach the API can act as any user, read their profile and history, and create sessions for them. | OAuth2/OIDC or JWT with short-lived access tokens and refresh rotation. |
 | L-2 | The session key is issued over TLS to any caller. | The payload encryption protects against an intermediary that terminates TLS and logs bodies. It does **not** protect against a malicious caller. | Bind the key to an authenticated session or derive it via ECDH. |
-| L-3 | The PIN is the only secret that authorises a payment. | A 4-digit PIN is guessable. The limits (3 wrong PINs per inquiry, 5 confirms/min) only slow an attacker down. | Account lockout, device binding, step-up authentication. |
+| L-3 | The CVV is the only secret that authorises a payment. | A 3-digit CVV is guessable. The limits (3 wrong CVVs per inquiry, 5 confirms/min) only slow an attacker down. | Account lockout, device binding, step-up authentication. |
 | L-4 | In-memory rate limiting | Resets on restart and does not work across several instances. | Redis-backed distributed limiter. |
 
 ---
@@ -471,7 +471,7 @@ total      = amountDue + serviceFee + vat
 | FR-CAT-1…7 | `GET /services`, `GET /services/sync` | `CatalogServiceTest`, `CatalogIT` |
 | FR-INQ-1…9 | `POST /payments/inquiry` | `InquiryServiceTest`, `PaymentFlowIT` |
 | FR-PAY-1…5 | `POST /payments/confirm` (idempotency) | `ConfirmServiceTest.idempotency*`, `ConcurrencyIT` |
-| FR-PAY-6…7 | PIN verification | `ConfirmServiceTest.wrongPin*` |
+| FR-PAY-6…7 | CVV verification | `ConfirmServiceTest.wrongCvv*` |
 | FR-PAY-8…10 | Confirm outcome | `MockPaymentEngineTest`, `PaymentFlowIT` |
 | FR-TXN-1…5 | `GET /payments/transactions[/{id}]` | `TransactionServiceTest`, `PaymentFlowIT` |
 | FR-MCK-1…3, §6 | `MockPaymentEngine`, `FeeCalculator` | `MockPaymentEngineTest`, `FeeCalculatorTest` |

@@ -29,31 +29,31 @@ class ConfirmFailuresIT {
     @Autowired private JdbcTemplate jdbc;
 
     @Test
-    void wrongPinsCountAndTheThirdInvalidatesTheInquiry() throws Exception {
-        PaymentClient omar = client("usr_03"); // PIN 9999
+    void wrongCvvsCountAndTheThirdInvalidatesTheInquiry() throws Exception {
+        PaymentClient omar = client("usr_03"); // CVV 123
         String inquiryId = omar.openInquiry("svc_elec_cairo", "1024750891");
 
         for (int attempt = 1; attempt <= 3; attempt++) {
-            omar.confirm(inquiryId, UUID.randomUUID(), "1234")
+            omar.confirm(inquiryId, UUID.randomUUID(), "321")
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
-                    .andExpect(jsonPath("$.error.field").value("pin"));
+                    .andExpect(jsonPath("$.error.field").value("cvv"));
         }
         assertThat(inquiryColumn(inquiryId, "status")).isEqualTo("INVALIDATED");
 
-        omar.confirm(inquiryId, UUID.randomUUID(), "9999") // even the right PIN
+        omar.confirm(inquiryId, UUID.randomUUID(), "123") // even the right CVV
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.error.code").value("INQUIRY_INVALIDATED"));
         assertThat(transactionsFor(inquiryId)).isEmpty();
     }
 
     @Test
-    void theRightPinStillWorksAfterOneMistake() throws Exception {
+    void theRightCvvStillWorksAfterOneMistake() throws Exception {
         PaymentClient omar = client("usr_03");
         String inquiryId = omar.openInquiry("svc_elec_cairo", "1024750891");
 
-        omar.confirm(inquiryId, UUID.randomUUID(), "0000").andExpect(status().isBadRequest());
-        omar.confirm(inquiryId, UUID.randomUUID(), "9999")
+        omar.confirm(inquiryId, UUID.randomUUID(), "000").andExpect(status().isBadRequest());
+        omar.confirm(inquiryId, UUID.randomUUID(), "123")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("SUCCESS"));
     }
@@ -66,7 +66,7 @@ class ConfirmFailuresIT {
                 "UPDATE inquiries SET expires_at = now() - interval '1 hour' WHERE id = ?",
                 inquiryId);
 
-        mina.confirm(inquiryId, UUID.randomUUID(), "1234")
+        mina.confirm(inquiryId, UUID.randomUUID(), "123")
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.error.code").value("INQUIRY_EXPIRED"));
     }
@@ -76,7 +76,7 @@ class ConfirmFailuresIT {
         PaymentClient mina = client("usr_01");
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750896");
 
-        mina.confirm(inquiryId, UUID.randomUUID(), "1234")
+        mina.confirm(inquiryId, UUID.randomUUID(), "123")
                 .andExpect(status().isUnprocessableContent())
                 .andExpect(jsonPath("$.error.code").value("AMOUNT_OUT_OF_RANGE"));
         assertThat(transactionsFor(inquiryId)).isEmpty();
@@ -87,7 +87,7 @@ class ConfirmFailuresIT {
         PaymentClient mina = client("usr_01");
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750897");
         UUID key = UUID.randomUUID();
-        String payload = Payloads.confirm(mina.sessionKey(), "1234");
+        String payload = Payloads.confirm(mina.sessionKey(), "123");
 
         mina.confirmWithPayload(inquiryId, key, payload)
                 .andExpect(status().isPaymentRequired())
@@ -98,7 +98,7 @@ class ConfirmFailuresIT {
         assertThat(transactionsFor(inquiryId)).containsExactly("FAILED");
         assertThat(inquiryColumn(inquiryId, "status")).isEqualTo("OPEN");
 
-        mina.confirm(inquiryId, UUID.randomUUID(), "1234") // "top up and retry": new key
+        mina.confirm(inquiryId, UUID.randomUUID(), "123") // "top up and retry": new key
                 .andExpect(status().isPaymentRequired());
         assertThat(transactionsFor(inquiryId)).containsExactly("FAILED", "FAILED");
     }
@@ -109,7 +109,7 @@ class ConfirmFailuresIT {
         String inquiryId = mina.openInquiry("svc_water_giza", "101426001");
         jdbc.update("UPDATE services SET is_active = FALSE WHERE id = 'svc_water_giza'");
         try {
-            mina.confirm(inquiryId, UUID.randomUUID(), "1234")
+            mina.confirm(inquiryId, UUID.randomUUID(), "123")
                     .andExpect(status().isServiceUnavailable())
                     .andExpect(jsonPath("$.error.code").value("SERVICE_UNAVAILABLE"));
         } finally {
@@ -118,17 +118,17 @@ class ConfirmFailuresIT {
     }
 
     @Test
-    void malformedPinOrPayloadIsRejected() throws Exception {
+    void malformedCvvOrPayloadIsRejected() throws Exception {
         PaymentClient mina = client("usr_01");
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750891");
 
-        mina.confirm(inquiryId, UUID.randomUUID(), "12a4")
+        mina.confirm(inquiryId, UUID.randomUUID(), "12a")
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.field").value("pin"));
+                .andExpect(jsonPath("$.error.field").value("cvv"));
         mina.confirmWithPayload(inquiryId, UUID.randomUUID(), "bm90IGEgcmVhbCBwYXlsb2Fk")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("DECRYPTION_FAILED"));
-        assertThat(inquiryColumn(inquiryId, "failed_pin_attempts")).isEqualTo("0");
+        assertThat(inquiryColumn(inquiryId, "failed_cvv_attempts")).isEqualTo("0");
     }
 
     private PaymentClient client(String userId) {

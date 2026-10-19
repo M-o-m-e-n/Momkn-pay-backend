@@ -40,7 +40,7 @@
 | 1 | `./mvnw verify` green on `main` (formatting, tests, contract, architecture, coverage) | ✅ |
 | 2 | Clean-machine rehearsal (§1) | ✅ |
 | 3 | Newman run of the whole collection against Docker | ✅ 38/38 |
-| 4 | Log audit: no PIN, key, payload or full subscriber number in real logs | ✅ (M4-S1) |
+| 4 | Log audit: no CVV, key, payload or full subscriber number in real logs | ✅ (M4-S1) |
 | 5 | gitleaks over the full history | ✅ no leaks outside the documented allowlist |
 | 6 | Performance smoke test within budget | ✅ (M4-S3, ADR-010) |
 | 7 | `docs/openapi.yaml` matches the code (`OpenApiContractIT`) and lints clean | ✅ |

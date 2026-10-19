@@ -33,7 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Pays an open inquiry with the PIN, exactly once per idempotency key (FR-PAY, LLD §9.4).
+ * Pays an open inquiry with the CVV, exactly once per idempotency key (FR-PAY, LLD §9.4).
  *
  * <p>Order matters:
  *
@@ -53,13 +53,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class ConfirmService {
 
     private static final Logger log = LoggerFactory.getLogger(ConfirmService.class);
-    private static final Pattern PIN = Pattern.compile("^[0-9]{4}$");
+    private static final Pattern CVV = Pattern.compile("^[0-9]{3}$");
 
     private final InquiryRepository inquiries;
     private final TransactionRepository transactions;
     private final UserRepository users;
     private final PayloadDecryptor decryptor;
-    private final PasswordEncoder pinEncoder;
+    private final PasswordEncoder cvvEncoder;
     private final SlowServiceDelay slowDelay;
     private final PendingResolver pendingResolver;
     private final TransactionTemplate tx;
@@ -71,7 +71,7 @@ public class ConfirmService {
             TransactionRepository transactions,
             UserRepository users,
             PayloadDecryptor decryptor,
-            PasswordEncoder pinEncoder,
+            PasswordEncoder cvvEncoder,
             SlowServiceDelay slowDelay,
             PendingResolver pendingResolver,
             TransactionTemplate tx,
@@ -81,7 +81,7 @@ public class ConfirmService {
         this.transactions = transactions;
         this.users = users;
         this.decryptor = decryptor;
-        this.pinEncoder = pinEncoder;
+        this.cvvEncoder = cvvEncoder;
         this.slowDelay = slowDelay;
         this.pendingResolver = pendingResolver;
         this.tx = tx;
@@ -153,22 +153,22 @@ public class ConfirmService {
             return ConfirmOutcome.failed(ErrorCode.SERVICE_UNAVAILABLE);
         }
 
-        // 4. the PIN (decryption failures throw and roll back; the nonce stays consumed)
+        // 4. the CVV (decryption failures throw and roll back; the nonce stays consumed)
         ConfirmPayload payload =
                 decryptor.decrypt(sessionId, userId, request.payload(), ConfirmPayload.class);
-        if (payload.pin() == null || !PIN.matcher(payload.pin()).matches()) {
-            throw new ApiException(ErrorCode.VALIDATION_ERROR, "pin");
+        if (payload.cvv() == null || !CVV.matcher(payload.cvv()).matches()) {
+            throw new ApiException(ErrorCode.VALIDATION_ERROR, "cvv");
         }
         User user =
                 users.findById(userId)
                         .orElseThrow(() -> new ApiException(ErrorCode.USER_NOT_FOUND));
-        if (!pinEncoder.matches(payload.pin(), user.getPinHash())) {
-            inquiry.registerWrongPin(); // committed with the outcome; the third invalidates
+        if (!cvvEncoder.matches(payload.cvv(), user.getCvvHash())) {
+            inquiry.registerWrongCvv(); // committed with the outcome; the third invalidates
             log.info(
-                    "payment.pin_failed inquiryId={} attempts={}",
+                    "payment.cvv_failed inquiryId={} attempts={}",
                     inquiry.getId(),
-                    inquiry.getFailedPinAttempts());
-            return ConfirmOutcome.failed(ErrorCode.VALIDATION_ERROR, "pin");
+                    inquiry.getFailedCvvAttempts());
+            return ConfirmOutcome.failed(ErrorCode.VALIDATION_ERROR, "cvv");
         }
 
         // 5. amount limits (mock rule 6)

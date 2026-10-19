@@ -19,7 +19,7 @@ import org.hibernate.type.SqlTypes;
 @Table(name = "inquiries")
 public class Inquiry {
 
-    public static final int MAX_WRONG_PINS = 3;
+    public static final int MAX_WRONG_CVVS = 3;
 
     @Id private String id;
 
@@ -64,8 +64,8 @@ public class Inquiry {
     private InquiryStatus status;
 
     @JdbcTypeCode(SqlTypes.SMALLINT)
-    @Column(name = "failed_pin_attempts", nullable = false)
-    private int failedPinAttempts;
+    @Column(name = "failed_cvv_attempts", nullable = false)
+    private int failedCvvAttempts;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -102,7 +102,7 @@ public class Inquiry {
         this.total = Math.addExact(Math.addExact(amountDue, serviceFee), vat);
         this.rule = rule;
         this.status = InquiryStatus.OPEN;
-        this.failedPinAttempts = 0;
+        this.failedCvvAttempts = 0;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
     }
@@ -111,10 +111,10 @@ public class Inquiry {
         return now.isAfter(expiresAt);
     }
 
-    /** Counts a wrong PIN; the third one invalidates the inquiry. */
-    public void registerWrongPin() {
-        failedPinAttempts++;
-        if (failedPinAttempts >= MAX_WRONG_PINS) {
+    /** Counts a wrong CVV; the third one invalidates the inquiry. */
+    public void registerWrongCvv() {
+        failedCvvAttempts++;
+        if (failedCvvAttempts >= MAX_WRONG_CVVS) {
             status = InquiryStatus.INVALIDATED;
         }
     }
@@ -175,8 +175,8 @@ public class Inquiry {
         return status;
     }
 
-    public int getFailedPinAttempts() {
-        return failedPinAttempts;
+    public int getFailedCvvAttempts() {
+        return failedCvvAttempts;
     }
 
     public Instant getCreatedAt() {

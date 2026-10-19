@@ -18,12 +18,12 @@ public final class Payloads {
                         .formatted(subscriberNumber, TestCrypto.nonce(), ts));
     }
 
-    public static String confirm(String sessionKey, String pin) {
+    public static String confirm(String sessionKey, String cvv) {
         return TestCrypto.encrypt(
                 sessionKey,
                 """
-                {"pin":"%s","nonce":"%s","ts":%d}\
+                {"cvv":"%s","nonce":"%s","ts":%d}\
                 """
-                        .formatted(pin, TestCrypto.nonce(), TestCrypto.nowTs()));
+                        .formatted(cvv, TestCrypto.nonce(), TestCrypto.nowTs()));
     }
 }

@@ -9,7 +9,7 @@ for (let run = 0; run < 200; run++) {
     const key = crypto.randomBytes(32);
     const iv = crypto.randomBytes(12);
     const length = run % 70; // covers empty, partial and multi-block plaintexts
-    const plaintext = JSON.stringify({ pin: '1234', nonce: crypto.randomBytes(16).toString('hex') })
+    const plaintext = JSON.stringify({ cvv: '123', nonce: crypto.randomBytes(16).toString('hex') })
         .padEnd(length, 'x')
         .slice(0, Math.max(length, 1));
 

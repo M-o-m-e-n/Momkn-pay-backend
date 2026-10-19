@@ -73,7 +73,8 @@ momknpay-backend/
     │           ├── V4__seed_history.sql
     │           ├── V5__drop_sessions.sql      # contract v2.0.0 (ADR-011)
     │           ├── V6__restore_sessions.sql   # contract v3.0.0 (ADR-012): same tables and columns as V1
-    │           └── V7__service_icons.sql      # icon_url → the icons below (§11.4)
+    │           ├── V7__service_icons.sql      # icon_url → the icons below (§11.4)
+    │       (V8__PinToCvv is a Java migration, see §11.5)
     │       static/icons/                      # service icons, served at /icons/ (§11.4)
     │       (V3__SeedUsers is a Java migration, see §11.2)
     └── test/java/com/momknpay/...  # see §12
@@ -251,7 +252,7 @@ CREATE TABLE users (
     mobile        VARCHAR(11)  NOT NULL UNIQUE
                   CHECK (mobile ~ '^01[0125][0-9]{8}$'),
     email         VARCHAR(254) NOT NULL,
-    pin_hash      VARCHAR(72)  NOT NULL,            -- bcrypt, cost 12
+    cvv_hash      VARCHAR(72)  NOT NULL,            -- bcrypt, cost 12
     member_since  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
@@ -321,8 +322,8 @@ CREATE TABLE inquiries (
                          CHECK (rule IN ('NORMAL','LARGE','DECLINE','PENDING')),
     status               VARCHAR(16)  NOT NULL DEFAULT 'OPEN'
                          CHECK (status IN ('OPEN','CONFIRMED','INVALIDATED')),
-    failed_pin_attempts  SMALLINT     NOT NULL DEFAULT 0
-                         CHECK (failed_pin_attempts BETWEEN 0 AND 3),
+    failed_cvv_attempts  SMALLINT     NOT NULL DEFAULT 0
+                         CHECK (failed_cvv_attempts BETWEEN 0 AND 3),
     created_at           TIMESTAMPTZ  NOT NULL,
     expires_at           TIMESTAMPTZ  NOT NULL,
     CONSTRAINT ck_inquiry_total CHECK (total = amount_due + service_fee + vat)
@@ -400,11 +401,11 @@ public enum TransactionStatus { SUCCESS, FAILED, PENDING }
 
 | Entity | Table | Key fields and behaviour |
 |---|---|---|
-| `User` | `users` | `id`, `fullName`, `mobile` (`updatable = false`), `email`, `pinHash`, `memberSince`, `updatedAt` |
+| `User` | `users` | `id`, `fullName`, `mobile` (`updatable = false`), `email`, `cvvHash`, `memberSince`, `updatedAt` |
 | `BillerService` | `services` | all columns. `boolean isSlow() { return id.endsWith("_slow"); }` |
 | `Session` | `sessions` | `boolean isExpired(Instant now)`, `boolean isRevoked()`, `boolean ownedBy(String userId)` |
 | `UsedNonce` | `used_nonces` | `nonce`, `sessionId`, `createdAt` |
-| `Inquiry` | `inquiries` | `@ManyToOne(fetch = LAZY) BillerService service`, `boolean isExpired(Instant now)`, `void registerWrongPin()` (increments and sets `INVALIDATED` at 3), `void markConfirmed()` |
+| `Inquiry` | `inquiries` | `@ManyToOne(fetch = LAZY) BillerService service`, `boolean isExpired(Instant now)`, `void registerWrongCvv()` (increments and sets `INVALIDATED` at 3), `void markConfirmed()` |
 | `Transaction` | `transactions` | `@ManyToOne(fetch = LAZY) BillerService service`, `boolean resolveIfDue(Instant now)` (PENDING → SUCCESS, `paidAt = pendingUntil`) |
 
 Repositories (Spring Data):
@@ -621,13 +622,13 @@ public record InquiryResponse(String inquiryId, String serviceId, String custome
 |---|---|
 | Headers | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` (UUID, required) |
 | Success | `200` (for `SUCCESS` and `PENDING`, first call and replays alike) |
-| Errors | `400 VALIDATION_ERROR` (`Idempotency-Key`, `inquiryId`, `payload`, `pin`), `400 DECRYPTION_FAILED`, `402 INSUFFICIENT_BALANCE`, `404 USER_NOT_FOUND`, `404 SESSION_NOT_FOUND`, `404 INQUIRY_NOT_FOUND`, `409 IDEMPOTENCY_CONFLICT`, `409 INQUIRY_ALREADY_CONFIRMED`, `410 SESSION_EXPIRED`, `410 INQUIRY_EXPIRED`, `410 INQUIRY_INVALIDATED`, `422 AMOUNT_OUT_OF_RANGE`, `429 RATE_LIMITED`, `503 SERVICE_UNAVAILABLE` |
+| Errors | `400 VALIDATION_ERROR` (`Idempotency-Key`, `inquiryId`, `payload`, `cvv`), `400 DECRYPTION_FAILED`, `402 INSUFFICIENT_BALANCE`, `404 USER_NOT_FOUND`, `404 SESSION_NOT_FOUND`, `404 INQUIRY_NOT_FOUND`, `409 IDEMPOTENCY_CONFLICT`, `409 INQUIRY_ALREADY_CONFIRMED`, `410 SESSION_EXPIRED`, `410 INQUIRY_EXPIRED`, `410 INQUIRY_INVALIDATED`, `422 AMOUNT_OUT_OF_RANGE`, `429 RATE_LIMITED`, `503 SERVICE_UNAVAILABLE` |
 
 ```json
 { "inquiryId": "inq_8f21a0c4d9e7b312", "payload": "<base64(iv‖ct‖tag)>" }
 ```
 ```json
-{ "pin": "1234", "nonce": "0a1b2c3d4e5f60718293a4b5c6d7e8f9", "ts": 1790000060 }
+{ "cvv": "123", "nonce": "0a1b2c3d4e5f60718293a4b5c6d7e8f9", "ts": 1790000060 }
 ```
 
 Response:
@@ -646,7 +647,7 @@ Response:
 ```java
 public record ConfirmRequest(@NotBlank @Size(max = 32) String inquiryId,
                              @NotBlank @Size(max = 4096) String payload) {}
-public record ConfirmPayload(String pin, String nonce, Long ts) implements EncryptedPayload {}
+public record ConfirmPayload(String cvv, String nonce, Long ts) implements EncryptedPayload {}
 public record ServiceRef(String id, String nameEn, String nameAr) {}
 public record ConfirmResponse(String transactionId, TransactionStatus status, String reference,
                               Instant paidAt, long total, ServiceRef service) {}
@@ -734,7 +735,7 @@ public enum ErrorCode {
     INQUIRY_ALREADY_CONFIRMED(409, "This inquiry has already been paid.", "تم دفع هذا الاستعلام بالفعل."),
     SESSION_EXPIRED(410, "Your secure session has expired.", "انتهت صلاحية الجلسة الآمنة."),
     INQUIRY_EXPIRED(410, "This inquiry has expired.", "انتهت صلاحية الاستعلام."),
-    INQUIRY_INVALIDATED(410, "Too many wrong PIN attempts. Start a new inquiry.", "محاولات رقم سري خاطئة كثيرة. ابدأ استعلامًا جديدًا."),
+    INQUIRY_INVALIDATED(410, "Too many wrong CVV attempts. Start a new inquiry.", "محاولات رقم سري خاطئة كثيرة. ابدأ استعلامًا جديدًا."),
     AMOUNT_OUT_OF_RANGE(422, "The amount is outside the allowed range for this service.", "المبلغ خارج الحد المسموح لهذه الخدمة."),
     RATE_LIMITED(429, "Too many attempts. Try again shortly.", "محاولات كثيرة. حاول مرة أخرى بعد قليل."),
     INTERNAL_ERROR(500, "Something went wrong.", "حدث خطأ ما."),
@@ -1001,13 +1002,13 @@ try {
 
 ### 9.4 `ConfirmService.confirm`
 
-The business work runs inside a `TransactionTemplate` and returns a **`ConfirmOutcome`** instead of throwing. Outcomes that must persist state *and* return an error (wrong PIN counter, FAILED transaction) therefore commit first, and are converted to an HTTP error afterwards.
+The business work runs inside a `TransactionTemplate` and returns a **`ConfirmOutcome`** instead of throwing. Outcomes that must persist state *and* return an error (wrong CVV counter, FAILED transaction) therefore commit first, and are converted to an HTTP error afterwards.
 
 ```java
 record ConfirmOutcome(ConfirmResponse response, ErrorCode error, String field) {
     static ConfirmOutcome paid(ConfirmResponse response)          // SUCCESS / PENDING → 200
     static ConfirmOutcome failed(ErrorCode error)                 // 402/409/410/422/503
-    static ConfirmOutcome failed(ErrorCode error, String field)   // wrong PIN → 400 field=pin
+    static ConfirmOutcome failed(ErrorCode error, String field)   // wrong CVV → 400 field=cvv
     ConfirmResponse render()                                      // the response, or throws ApiException(error, field)
 }
 ```
@@ -1042,11 +1043,11 @@ doConfirm(userId, sessionId, key, req, slow):                        // inside O
     if !inq.service.isActive:                        return failed(SERVICE_UNAVAILABLE)
 
     p = decryptor.decrypt(sessionId, userId, req.payload, ConfirmPayload.class)   // throws → rollback (nothing written)
-    if p.pin == null or !p.pin.matches("\\d{4}"):    throw VALIDATION_ERROR("pin")  // format error, no counter
-    if !bcrypt.matches(p.pin, user.pinHash):
-        inq.registerWrongPin()                                         // 3rd → INVALIDATED
-        log.info("payment.pin_failed inquiryId={} attempts={}", inq.id, inq.failedPinAttempts)
-        return failed(VALIDATION_ERROR, "pin")
+    if p.cvv == null or !p.cvv.matches("\\d{3}"):    throw VALIDATION_ERROR("cvv")  // format error, no counter
+    if !bcrypt.matches(p.cvv, user.cvvHash):
+        inq.registerWrongCvv()                                         // 3rd → INVALIDATED
+        log.info("payment.cvv_failed inquiryId={} attempts={}", inq.id, inq.failedCvvAttempts)
+        return failed(VALIDATION_ERROR, "cvv")
 
     if inq.rule == LARGE or inq.amountDue > svc.maxAmount or inq.amountDue < svc.minAmount:
         return failed(AMOUNT_OUT_OF_RANGE)
@@ -1084,7 +1085,7 @@ render(outcome):
 | Retry resends the same nonce | The replay check runs before decryption, so the retry never reaches `ReplayGuard`. |
 | Two concurrent first-time requests with the same key | The row lock on the inquiry serialises them. The second one sees the first's transaction in the re-check. The unique constraint is the backstop. |
 | Same key, different inquiry | `IDEMPOTENCY_CONFLICT`. |
-| Wrong-PIN counter must survive the error response | It is returned as an outcome, committed, and only then turned into a 400. |
+| Wrong-CVV counter must survive the error response | It is returned as an outcome, committed, and only then turned into a 400. |
 | DECLINE must be recorded (the Activity screen shows *Declined*) | A `FAILED` transaction is committed. Replaying its key returns the same 402. |
 | `_slow` delay must not hold locks or connections | The sleep runs after the transaction commits, on a virtual thread. |
 
@@ -1265,7 +1266,7 @@ The largest normal `amountDue` (digits 3–7 = `99999`) is below every `maxAmoun
 
 ### 11.2 `V3__SeedUsers` — Java-based Flyway migration
 
-This is a Java migration so PIN hashes are generated with the real `BCryptPasswordEncoder(12)` at migration time. No hash literals are committed.
+This is a Java migration so PIN hashes are generated with the real `BCryptPasswordEncoder(12)` at migration time. No hash literals are committed. These PINs no longer work: `V8__PinToCvv` replaces them with the CVV `123` (§11.5).
 
 | id | fullName | mobile | email | PIN | memberSince |
 |---|---|---|---|---|---|
@@ -1316,6 +1317,18 @@ The `updated_at` trigger stamps every row, so clients receive the new URLs on th
 
 ---
 
+### 11.5 `V8__PinToCvv` — the CVV replaces the PIN (ADR-014)
+
+A Java migration, like V3, so the hash comes from the real `BCryptPasswordEncoder(12)`:
+
+```sql
+ALTER TABLE users RENAME COLUMN pin_hash TO cvv_hash;
+ALTER TABLE inquiries RENAME COLUMN failed_pin_attempts TO failed_cvv_attempts;  -- the CHECK follows the column
+UPDATE users SET cvv_hash = bcrypt('123');                                         -- every user, cost 12
+```
+
+---
+
 ## 12. Test design
 
 ### 12.1 Unit tests (JUnit 5 + AssertJ + Mockito; fixed `Clock`)
@@ -1335,7 +1348,7 @@ The `updated_at` trigger stamps every row, so clients receive the new URLs on th
 | U11 | `ConfirmServiceTest.expiredInquiryCannotBePaid` | clock + 5 min 1 s → `INQUIRY_EXPIRED`, no transaction | FR-INQ-8 |
 | U12 | `ConfirmServiceTest.idempotentReplayReturnsSameTransaction` | the second call with the same key returns the same `transactionId` and does not decrypt | FR-PAY-2 |
 | U13 | `ConfirmServiceTest.idempotencyKeyReusedForOtherInquiry` | `IDEMPOTENCY_CONFLICT` | FR-PAY-3 |
-| U14 | `ConfirmServiceTest.threeWrongPinsInvalidateInquiry` | attempts 1–3 → `VALIDATION_ERROR(pin)`, then `INQUIRY_INVALIDATED` | FR-PAY-7 |
+| U14 | `ConfirmServiceTest.threeWrongCvvsInvalidateInquiry` | attempts 1–3 → `VALIDATION_ERROR(cvv)`, then `INQUIRY_INVALIDATED` | FR-PAY-7 |
 | U15 | `ConfirmServiceTest.largeBillRejected` | rule 6 → `AMOUNT_OUT_OF_RANGE`, no transaction | FR-PAY-8 |
 | U16 | `ConfirmServiceTest.declineRecordsFailedTransaction` | rule 7 → a FAILED transaction is saved, 402 | §6.1 |
 | U17 | `PendingResolverTest.flipsAfterDelay` | +9 s still PENDING; +10 s SUCCESS with `paidAt = pendingUntil` | FR-TXN-5 |
@@ -1354,8 +1367,8 @@ The `updated_at` trigger stamps every row, so clients receive the new URLs on th
 | I6 | `PaymentFlowIT` | Full encrypted flow for digits 1, 6, 7, 8 and 9, 0. Receipt and history ordering. PENDING becomes SUCCESS after the clock advances. |
 | I7 | `ConcurrencyIT` | 10 parallel confirms with the same key → exactly 1 row, all responses carry the same `transactionId`. 2 keys on the same inquiry → 1 success and 1 `INQUIRY_ALREADY_CONFIRMED`. |
 | I8 | `RateLimitIT` | The sixth confirm within a minute → 429 with `Retry-After`. |
-| I9 | `SeedDataIT` | 3 users with working PINs, all 6 categories, ≥ 24 visible services, the `_slow` and inactive services present. |
-| I10 | `LogHygieneTest` | Runs I6 with a captured appender and asserts that no PIN (`1234`), session key, `payload`, or full subscriber number (`1024750891`) appears in the logs. |
+| I9 | `SeedDataIT` | 3 users with working CVVs, all 6 categories, ≥ 24 visible services, the `_slow` and inactive services present. |
+| I10 | `LogHygieneTest` | Runs I6 with a captured appender and asserts that no CVV (`123`), session key, `payload`, or full subscriber number (`1024750891`) appears in the logs. |
 
 A test helper `TestCrypto.encrypt(sessionKey, json)` mirrors exactly what the clients do, including a fresh nonce and the current `ts`.
 
@@ -1452,6 +1465,6 @@ Momkn Pay v1
 ├── 02 Profile          get · patch · patch mobile (400) · duplicate email (409)
 ├── 03 Catalogue        services · sync · sync bad since
 ├── 04 Inquiry rules    digit 0 · 1 · 6 · 7 · 8 · 9 · _slow · inactive · bad pattern · replayed nonce
-├── 05 Confirm rules    success · replay same key · conflict key · wrong PIN ×3 · expired · decline · pending
+├── 05 Confirm rules    success · replay same key · conflict key · wrong CVV ×3 · expired · decline · pending
 └── 06 History          list · receipt · foreign receipt (404)
 ```
