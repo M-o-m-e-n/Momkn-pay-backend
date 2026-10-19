@@ -30,7 +30,7 @@ class SchemaIT {
     @BeforeEach
     void insertFixtures() {
         jdbc.update(
-                "INSERT INTO users (id, full_name, mobile, email, pin_hash) VALUES (?,?,?,?,?)",
+                "INSERT INTO users (id, full_name, mobile, email, cvv_hash) VALUES (?,?,?,?,?)",
                 USER,
                 "Schema Test",
                 "01099999999",
@@ -85,7 +85,7 @@ class SchemaIT {
         assertThatThrownBy(
                         () ->
                                 jdbc.update(
-                                        "INSERT INTO users (id, full_name, mobile, email, pin_hash)"
+                                        "INSERT INTO users (id, full_name, mobile, email, cvv_hash)"
                                             + " VALUES ('usr_bad', 'Bad', '0301234567', 'b@x.io',"
                                             + " 'h')"))
                 .isInstanceOf(DataIntegrityViolationException.class);

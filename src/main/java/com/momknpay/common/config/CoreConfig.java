@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-/** Shared infrastructure beans: typed properties, the clock, the CSPRNG and the PIN hasher. */
+/** Shared infrastructure beans: typed properties, the clock, the CSPRNG and the CVV hasher. */
 @Configuration
 @EnableConfigurationProperties(AppProperties.class)
 public class CoreConfig {
@@ -25,9 +25,9 @@ public class CoreConfig {
         return new SecureRandom();
     }
 
-    /** PINs are only ever stored and compared as bcrypt hashes, cost 12 (NFR-SEC-5). */
+    /** CVVs are only ever stored and compared as bcrypt hashes, cost 12 (NFR-SEC-5). */
     @Bean
-    PasswordEncoder pinEncoder() {
+    PasswordEncoder cvvEncoder() {
         return new BCryptPasswordEncoder(12);
     }
 }

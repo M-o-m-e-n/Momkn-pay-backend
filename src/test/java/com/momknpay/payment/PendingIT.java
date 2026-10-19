@@ -48,7 +48,7 @@ class PendingIT {
         UUID key = UUID.randomUUID();
 
         String body =
-                mina.confirm(inquiryId, key, "1234")
+                mina.confirm(inquiryId, key, "123")
                         .andExpect(status().isOk())
                         .andExpect(jsonPath("$.status").value("PENDING"))
                         .andExpect(jsonPath("$.paidAt").value(nullValue()))
@@ -60,11 +60,11 @@ class PendingIT {
         assertThat(Duration.between(Instant.now(), pendingUntil))
                 .isBetween(Duration.ofSeconds(8), Duration.ofSeconds(10));
 
-        mina.confirm(inquiryId, key, "1234") // replay before it is due
+        mina.confirm(inquiryId, key, "123") // replay before it is due
                 .andExpect(jsonPath("$.status").value("PENDING"));
 
         Instant due = makeDue(transactionId);
-        mina.confirm(inquiryId, key, "1234") // replay after it is due
+        mina.confirm(inquiryId, key, "123") // replay after it is due
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value(transactionId))
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
@@ -76,7 +76,7 @@ class PendingIT {
     void sweepResolvesRowsNobodyReads() throws Exception {
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750898");
         String body =
-                mina.confirm(inquiryId, UUID.randomUUID(), "1234")
+                mina.confirm(inquiryId, UUID.randomUUID(), "123")
                         .andReturn()
                         .getResponse()
                         .getContentAsString();
@@ -94,9 +94,9 @@ class PendingIT {
     @Test
     void aPendingInquiryCannotBePaidAgain() throws Exception {
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750898");
-        mina.confirm(inquiryId, UUID.randomUUID(), "1234").andExpect(status().isOk());
+        mina.confirm(inquiryId, UUID.randomUUID(), "123").andExpect(status().isOk());
 
-        mina.confirm(inquiryId, UUID.randomUUID(), "1234")
+        mina.confirm(inquiryId, UUID.randomUUID(), "123")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("INQUIRY_ALREADY_CONFIRMED"));
     }

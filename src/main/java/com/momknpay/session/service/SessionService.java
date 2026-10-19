@@ -19,7 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Issues and revokes crypto sessions — the AES key that encrypts PIN and subscriber number. */
+/** Issues and revokes crypto sessions — the AES key that encrypts CVV and subscriber number. */
 @Service
 public class SessionService {
 

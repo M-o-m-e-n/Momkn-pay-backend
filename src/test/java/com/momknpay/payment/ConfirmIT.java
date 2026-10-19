@@ -55,7 +55,7 @@ class ConfirmIT {
         String today = LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.BASIC_ISO_DATE);
 
         String body =
-                mina.confirm(inquiryId, UUID.randomUUID(), "1234")
+                mina.confirm(inquiryId, UUID.randomUUID(), "123")
                         .andExpect(status().isOk())
                         .andExpect(jsonPath("$.transactionId").value(matchesPattern("^txn_\\d+$")))
                         .andExpect(jsonPath("$.status").value("SUCCESS"))
@@ -79,19 +79,19 @@ class ConfirmIT {
                                 String.class,
                                 transactionId))
                 .isEqualTo("SUCCESS");
-        assertThat(output.getAll()).contains("payment.confirmed").doesNotContain("\"1234\"");
+        assertThat(output.getAll()).contains("payment.confirmed").doesNotContain("\"123\"");
     }
 
     @Test
     void retryWithTheSameBytesReturnsTheSameTransaction() throws Exception {
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750891");
         UUID key = UUID.randomUUID();
-        String payload = Payloads.confirm(mina.sessionKey(), "1234");
+        String payload = Payloads.confirm(mina.sessionKey(), "123");
 
         String first = transactionId(mina.confirmWithPayload(inquiryId, key, payload));
         String retry =
                 transactionId(mina.confirmWithPayload(inquiryId, key, payload)); // same nonce
-        String fresh = transactionId(mina.confirm(inquiryId, key, "1234")); // new nonce, same key
+        String fresh = transactionId(mina.confirm(inquiryId, key, "123")); // new nonce, same key
 
         assertThat(retry).isEqualTo(first);
         assertThat(fresh).isEqualTo(first);
@@ -108,9 +108,9 @@ class ConfirmIT {
         String first = mina.openInquiry("svc_elec_cairo", "1024750891");
         String second = mina.openInquiry("svc_elec_cairo", "1024750892");
         UUID key = UUID.randomUUID();
-        mina.confirm(first, key, "1234").andExpect(status().isOk());
+        mina.confirm(first, key, "123").andExpect(status().isOk());
 
-        mina.confirm(second, key, "1234")
+        mina.confirm(second, key, "123")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("IDEMPOTENCY_CONFLICT"));
     }
@@ -118,9 +118,9 @@ class ConfirmIT {
     @Test
     void aPaidInquiryCannotBePaidAgainWithANewKey() throws Exception {
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750891");
-        mina.confirm(inquiryId, UUID.randomUUID(), "1234").andExpect(status().isOk());
+        mina.confirm(inquiryId, UUID.randomUUID(), "123").andExpect(status().isOk());
 
-        mina.confirm(inquiryId, UUID.randomUUID(), "1234")
+        mina.confirm(inquiryId, UUID.randomUUID(), "123")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("INQUIRY_ALREADY_CONFIRMED"));
     }
@@ -129,7 +129,7 @@ class ConfirmIT {
     void idempotencyKeyIsRequiredAndMustBeAUuid() throws Exception {
         String inquiryId = mina.openInquiry("svc_elec_cairo", "1024750891");
 
-        mina.confirm(inquiryId, null, "1234")
+        mina.confirm(inquiryId, null, "123")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.field").value("Idempotency-Key"));
         mvc.perform(
@@ -148,10 +148,10 @@ class ConfirmIT {
         String minasInquiry = mina.openInquiry("svc_elec_cairo", "1024750891");
         PaymentClient sara = new PaymentClient(mvc, "usr_02", sessionService.create("usr_02"));
 
-        mina.confirm("inq_0000000000000000", UUID.randomUUID(), "1234")
+        mina.confirm("inq_0000000000000000", UUID.randomUUID(), "123")
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("INQUIRY_NOT_FOUND"));
-        sara.confirm(minasInquiry, UUID.randomUUID(), "1234")
+        sara.confirm(minasInquiry, UUID.randomUUID(), "123")
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("INQUIRY_NOT_FOUND"));
     }

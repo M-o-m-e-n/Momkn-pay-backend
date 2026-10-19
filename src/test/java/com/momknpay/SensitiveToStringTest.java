@@ -27,7 +27,7 @@ class SensitiveToStringTest {
     }
 
     @Test
-    void pinIsMasked() {
+    void cvvIsMasked() {
         assertThat(new ConfirmPayload("9876", "ab".repeat(16), 1L).toString())
                 .doesNotContain("9876")
                 .contains("****");

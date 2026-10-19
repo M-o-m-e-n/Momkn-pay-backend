@@ -146,7 +146,7 @@ class TransactionIT {
         String inquiryId = omar.openInquiry("svc_elec_cairo", "1024750898");
         String transactionId =
                 JsonPath.read(
-                        omar.confirm(inquiryId, UUID.randomUUID(), "9999")
+                        omar.confirm(inquiryId, UUID.randomUUID(), "123")
                                 .andExpect(jsonPath("$.status").value("PENDING"))
                                 .andReturn()
                                 .getResponse()

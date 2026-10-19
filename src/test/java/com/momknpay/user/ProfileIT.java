@@ -37,7 +37,7 @@ class ProfileIT {
                 .andExpect(jsonPath("$.mobile").value("01000000001"))
                 .andExpect(jsonPath("$.email").value("mina@example.com"))
                 .andExpect(jsonPath("$.memberSince").value("2026-09-01T09:00:00Z"))
-                .andExpect(jsonPath("$.pinHash").doesNotExist());
+                .andExpect(jsonPath("$.cvvHash").doesNotExist());
     }
 
     @Test

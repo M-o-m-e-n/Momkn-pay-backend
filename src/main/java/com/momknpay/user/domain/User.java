@@ -22,8 +22,8 @@ public class User {
     @Column(nullable = false, length = 254)
     private String email;
 
-    @Column(name = "pin_hash", nullable = false, length = 72)
-    private String pinHash;
+    @Column(name = "cvv_hash", nullable = false, length = 72)
+    private String cvvHash;
 
     @Column(name = "member_since", nullable = false, updatable = false)
     private Instant memberSince;
@@ -38,13 +38,13 @@ public class User {
             String fullName,
             String mobile,
             String email,
-            String pinHash,
+            String cvvHash,
             Instant memberSince) {
         this.id = id;
         this.fullName = fullName;
         this.mobile = mobile;
         this.email = email;
-        this.pinHash = pinHash;
+        this.cvvHash = cvvHash;
         this.memberSince = memberSince;
         this.updatedAt = memberSince;
     }
@@ -75,8 +75,8 @@ public class User {
         return email;
     }
 
-    public String getPinHash() {
-        return pinHash;
+    public String getCvvHash() {
+        return cvvHash;
     }
 
     public Instant getMemberSince() {

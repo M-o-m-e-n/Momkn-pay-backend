@@ -16,7 +16,7 @@ const BASE = new URL(process.env.BASE_URL || 'https://localhost/v1');
 const REQUESTS = Number(process.env.REQUESTS || 200);
 const CONCURRENCY = Number(process.env.CONCURRENCY || 10);
 const BUDGET_MS = 300;
-const CONFIRM_BUDGET_MS = 500; // bcrypt(12) PIN check, see docs/DECISIONS.md ADR-010
+const CONFIRM_BUDGET_MS = 500; // bcrypt(12) CVV check, see docs/DECISIONS.md ADR-010
 const agent = new https.Agent({ keepAlive: true, rejectUnauthorized: false, maxSockets: CONCURRENCY });
 
 function call(method, route, { user, session, key, body } = {}) {
@@ -103,7 +103,7 @@ async function measure(name, count, concurrency, request, expectStatus) {
 
     // confirm: 5 per user per minute (rate limit), each on its own fresh inquiry
     const confirmTimes = [];
-    for (const [user, pin] of [['usr_01', '1234'], ['usr_03', '9999']]) {
+    for (const [user, cvv] of [['usr_01', '123'], ['usr_03', '123']]) {
         const s = sessions[user];
         for (let i = 0; i < 5; i++) {
             const inquiry = await call('POST', '/payments/inquiry', {
@@ -112,7 +112,7 @@ async function measure(name, count, concurrency, request, expectStatus) {
             });
             const res = await call('POST', '/payments/confirm', {
                 user, session: s.sessionId, key: crypto.randomUUID(),
-                body: { inquiryId: inquiry.body.inquiryId, payload: seal(s.sessionKey, { pin }) },
+                body: { inquiryId: inquiry.body.inquiryId, payload: seal(s.sessionKey, { cvv }) },
             });
             if (res.status !== 200) throw new Error(`confirm: ${res.status} ${JSON.stringify(res.body)}`);
             confirmTimes.push(res.ms);

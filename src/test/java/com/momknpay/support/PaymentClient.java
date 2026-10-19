@@ -53,10 +53,10 @@ public final class PaymentClient {
                                         .formatted(serviceId, payload)));
     }
 
-    public ResultActions confirm(String inquiryId, UUID idempotencyKey, String pin)
+    public ResultActions confirm(String inquiryId, UUID idempotencyKey, String cvv)
             throws Exception {
         return confirmWithPayload(
-                inquiryId, idempotencyKey, Payloads.confirm(session.sessionKey(), pin));
+                inquiryId, idempotencyKey, Payloads.confirm(session.sessionKey(), cvv));
     }
 
     /** Sends exactly these bytes — used to replay an identical request. */
