@@ -427,6 +427,7 @@ flowchart LR
 - [x] **M9-S1 · Ads endpoint, banners and seed**
   - [x] Contract v4.1.0: `GET /ads` (public), `AdItem`, `AdListResponse`; changelog row.
   - [x] `V9__ads.sql` with an https-only `link_url`; five banners in `static/ads/`.
+  - [x] Banners changed to 16:9 (1280×720) by `V10__ads_16x9.sql`.
   - [x] `AdIT`: order, shape, inactive ads hidden, every image served without headers, a non-https link refused. Postman "List ads".
   - [x] **Done when:** `./mvnw clean verify` is green, `OpenApiContractIT` matches v4.1.0, and every `imageUrl` returns a PNG.
   - Refs: SRS FR-AD-1…4, LLD §6.11 and §11.6
