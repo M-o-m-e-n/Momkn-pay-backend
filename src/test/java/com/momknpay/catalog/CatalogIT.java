@@ -3,11 +3,14 @@ package com.momknpay.catalog;
 import static com.momknpay.support.ApiRequests.withClientHeaders;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
 import com.momknpay.TestcontainersConfiguration;
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -18,6 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -26,6 +31,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class CatalogIT {
+
+    private static final String ICON_BASE_URL = "https://momkn.ahmedsayed.net/icons/";
 
     @Autowired private MockMvc mvc;
     @Autowired private JdbcTemplate jdbc;
@@ -72,8 +79,10 @@ class CatalogIT {
                 .containsEntry("inputPattern", "^[0-9]{10}$")
                 .containsEntry("minAmount", 500) // integer piastres, never a float
                 .containsEntry("maxAmount", 500000)
-                .containsEntry("isActive", true)
-                .containsEntry("updatedAt", "2026-09-18T09:00:00Z");
+                .containsEntry("isActive", true);
+        // V7 changed every icon after the seed, so updatedAt is the time that migration ran
+        assertThat(Instant.parse((String) cairo.get("updatedAt")))
+                .isAfter(Instant.parse("2026-09-18T09:00:00Z"));
     }
 
     @Test
@@ -143,6 +152,26 @@ class CatalogIT {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
                     .andExpect(jsonPath("$.error.field").value("since"));
+        }
+    }
+
+    @Test
+    void everyIconUrlPointsAtAnIconTheServerServesWithoutHeaders() throws Exception {
+        String body = getJson("/v1/services");
+
+        List<Map<String, Object>> items = JsonPath.read(body, "$.items[*]");
+        for (Map<String, Object> item : items) {
+            String state = Boolean.TRUE.equals(item.get("isActive")) ? "active" : "inactive";
+            String expected = "icon-%s-%s.png".formatted(item.get("category"), state);
+            assertThat((String) item.get("iconUrl"))
+                    .startsWith(ICON_BASE_URL)
+                    .endsWith("/" + expected);
+
+            // an image loader sends none of the API headers
+            mvc.perform(get(URI.create((String) item.get("iconUrl")).getPath()))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentType(MediaType.IMAGE_PNG))
+                    .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=86400, public"));
         }
     }
 

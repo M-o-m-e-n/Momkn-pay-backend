@@ -2,6 +2,11 @@
 
 All notable changes to the Momkn Pay backend. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/). API contract changes are also recorded in the changelog inside [`docs/openapi.yaml`](docs/openapi.yaml).
 
+## [Unreleased]
+
+### Fixed
+- `iconUrl` pointed at `cdn.momknpay.local`, which was never hosted. The backend now serves 256×256 PNG icons at `https://momkn.ahmedsayed.net/icons/icon-<category>-<active|inactive>.png`; inactive services get the grey variant. Migration `V7__service_icons.sql` updates every service, so clients pick the new URLs up on their next sync. The contract is unchanged (same field, still a URI).
+
 ## [3.0.0] — 2026-10-06
 
 **Breaking:** sessions are back, as in 1.0.0 (ADR-012). Contract v3.0.0.

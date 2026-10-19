@@ -382,6 +382,12 @@ flowchart LR
   - [ ] Tell both client tracks about contract v3.0.0 and get their sign-off.
   - [ ] **Done when:** both apps pay with a session key and hold no built-in key.
 
+- [x] **M6-S5 · Service icons** *(fix after deployment)*
+  - [x] Icons in `static/icons/` (active and inactive PNG per category), served at `/icons/` without API headers, cached for a day.
+  - [x] `V7__service_icons.sql` points `icon_url` at them (V2 untouched); `CatalogIT` fetches every `iconUrl`.
+  - [x] **Done when:** every `iconUrl` from `GET /v1/services` returns a PNG, and `./mvnw clean verify` is green. *(88 unit + 111 IT)*
+  - Refs: SRS FR-CAT-2, LLD §6 and §11.4
+
 ---
 
 ## Definition of done — backend (from the brief, adapted)
