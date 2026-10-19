@@ -2,7 +2,20 @@
 
 All notable changes to the Momkn Pay backend. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/). API contract changes are also recorded in the changelog inside [`docs/openapi.yaml`](docs/openapi.yaml).
 
-## [Unreleased]
+## [4.0.0] — 2026-10-19
+
+**Breaking:** payments are confirmed with a 3-digit CVV instead of the 4-digit PIN (ADR-014). Contract v4.0.0.
+
+### Changed
+- The confirm payload decrypts to `{ cvv, nonce, ts }`; `cvv` must be exactly 3 digits. A wrong or malformed CVV is `VALIDATION_ERROR` with `field: "cvv"`. Three wrong CVVs still invalidate the inquiry.
+- Every seeded user's CVV is `123`. Migration `V8__PinToCvv` renames the PIN columns and sets the new hash; an existing database upgrades in place.
+- The Postman collection, the perf script and the docs use the CVV.
+
+### Migration for clients
+1. Ask for a 3-digit CVV on the confirm screen instead of the 4-digit PIN.
+2. Encrypt `{ "cvv": "123", "nonce": …, "ts": … }` instead of `{ "pin": … }`.
+3. Show the wrong-CVV error on `VALIDATION_ERROR` with `field: "cvv"`.
+
 
 ### Fixed
 - `iconUrl` pointed at `cdn.momknpay.local`, which was never hosted. The backend now serves 256×256 PNG icons at `https://momkn.ahmedsayed.net/icons/icon-<category>-<active|inactive>.png`; inactive services get the grey variant. Migration `V7__service_icons.sql` updates every service, so clients pick the new URLs up on their next sync. The contract is unchanged (same field, still a URI).

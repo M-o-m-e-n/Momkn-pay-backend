@@ -46,7 +46,7 @@ This document describes the architecture of the Momkn Pay backend: its component
 | One frozen contract for three teams | SRS C-7 | Code-first OpenAPI (springdoc) exported to the contract repository. DTOs are the single source of the schema. |
 | Payment correctness under retries | FR-PAY-2…4 | Idempotency key stored on the transaction with a database unique constraint, plus a row lock on the inquiry. |
 | Deterministic, demo-safe outcomes | FR-MCK-1 | A pure `MockPaymentEngine` with no randomness and no I/O. |
-| Protect PIN and subscriber number beyond TLS | NFR-SEC-1…4 | A session-scoped AES-256-GCM key, a replay guard, and keys wrapped at rest. |
+| Protect CVV and subscriber number beyond TLS | NFR-SEC-1…4 | A session-scoped AES-256-GCM key, a replay guard, and keys wrapped at rest. |
 | Integer money | C-2 | `long` in Java, `BIGINT` in SQL, integer-only fee arithmetic. |
 | One-command startup | NFR-OPS-1 | Docker Compose, Flyway migrations and seed data applied at boot. |
 | No auth | C-1 | A `CurrentUserArgumentResolver` resolves `X-User-Id` into a user. It is the single place to swap in real auth later. |
@@ -340,11 +340,11 @@ sequenceDiagram
     end
     CS->>DB: SELECT inquiry ... FOR UPDATE (owner check)
     CS->>CS: checks: expired → 410, INVALIDATED → 410,<br/>already has SUCCESS/PENDING txn → 409, service inactive → 503
-    CS->>PD: decrypt payload → {pin}
-    CS->>CS: bcrypt.matches(pin, user.pinHash)
-    alt wrong PIN
-        CS->>DB: failed_pin_attempts += 1 (3 ⇒ status INVALIDATED)
-        CS-->>App: 400 VALIDATION_ERROR field=pin
+    CS->>PD: decrypt payload → {cvv}
+    CS->>CS: bcrypt.matches(cvv, user.cvvHash)
+    alt wrong CVV
+        CS->>DB: failed_cvv_attempts += 1 (3 ⇒ status INVALIDATED)
+        CS-->>App: 400 VALIDATION_ERROR field=cvv
     end
     opt _slow service
         CS->>CS: sleep 8s
@@ -387,8 +387,8 @@ Resolution is **lazy**: every read path (list, receipt, idempotent replay) calls
 stateDiagram-v2
     [*] --> OPEN: inquiry success
     OPEN --> CONFIRMED: confirm → SUCCESS / PENDING
-    OPEN --> OPEN: confirm → FAILED (retry allowed, new key)<br/>or wrong PIN (<3)
-    OPEN --> INVALIDATED: 3rd wrong PIN
+    OPEN --> OPEN: confirm → FAILED (retry allowed, new key)<br/>or wrong CVV (<3)
+    OPEN --> INVALIDATED: 3rd wrong CVV
     OPEN --> Expired: now > expires_at (derived, not stored)
     CONFIRMED --> [*]
     INVALIDATED --> [*]
@@ -415,7 +415,7 @@ erDiagram
         varchar full_name
         varchar mobile UK
         varchar email UK
-        varchar pin_hash
+        varchar cvv_hash
         timestamptz member_since
     }
     SERVICES {
@@ -453,7 +453,7 @@ erDiagram
         bigint total
         varchar rule
         varchar status
-        int failed_pin_attempts
+        int failed_cvv_attempts
         timestamptz expires_at
     }
     TRANSACTIONS {
@@ -481,12 +481,12 @@ The full DDL, indexes and constraints are in LLD §4.
 | # | Control | Protects against | Where |
 |---|---|---|---|
 | 1 | TLS 1.2+ with a self-signed certificate. Clients pin the SPKI SHA-256 (live + backup). | Network eavesdropping, MITM with a rogue CA. | Tomcat, clients |
-| 2 | AES-256-GCM payload encryption of the subscriber number and PIN. | An intermediary that terminates TLS and logs bodies (proxy, load balancer, APM). | `PayloadDecryptor` |
+| 2 | AES-256-GCM payload encryption of the subscriber number and CVV. | An intermediary that terminates TLS and logs bodies (proxy, load balancer, APM). | `PayloadDecryptor` |
 | 3 | Replay guard: `ts` within ±120 s and single-use `nonce` (kept 5 min). | Captured-payload replay. | `ReplayGuard`, `used_nonces` |
 | 4 | Session keys wrapped with `APP_MASTER_KEY` (AES-GCM) at rest, 30-min TTL, owner-bound, revocable. | A database dump that reveals live keys. | `KeyWrapper`, `sessions` |
-| 5 | PIN stored as a bcrypt hash (cost 12). 3 wrong PINs invalidate the inquiry. | PIN disclosure, brute force per inquiry. | `ConfirmService` |
-| 6 | Rate limits: 5/min/user on `/sessions` and `/payments/confirm`. | PIN brute force, key-issuance abuse. | `RateLimitInterceptor` |
-| 7 | Log hygiene: no PIN, key, payload or full subscriber number in logs. | Secrets leaking through logs. | Logback config, `Masking` |
+| 5 | CVV stored as a bcrypt hash (cost 12). 3 wrong CVVs invalidate the inquiry. | CVV disclosure, brute force per inquiry. | `ConfirmService` |
+| 6 | Rate limits: 5/min/user on `/sessions` and `/payments/confirm`. | CVV brute force, key-issuance abuse. | `RateLimitInterceptor` |
+| 7 | Log hygiene: no CVV, key, payload or full subscriber number in logs. | Secrets leaking through logs. | Logback config, `Masking` |
 | 8 | Secrets only from the environment. `.env` and `certs/` are git-ignored. | Secrets leaking through the repository. | Config |
 
 ### 10.2 Encryption scheme (shared contract)
@@ -526,8 +526,8 @@ Because `X-User-Id` is trusted (SRS L-1), controls 2–6 **do not** stop a malic
 | Format | Logback, one line per event to stdout. Pattern includes `%X{requestId}`, level and logger. |
 | Correlation | `RequestIdFilter` puts `X-Request-Id` in the MDC and clears it after the request. |
 | Access log | One summary line per request: method, path template, status, duration, platform, version, user ID. **No bodies.** |
-| Business events | `inquiry.created`, `payment.confirmed`, `payment.replayed`, `payment.pin_failed`, `session.created`. Each logs IDs and a masked subscriber number (`******0891`) only. |
-| Forbidden in logs | PIN, `sessionKey`, `payload` (encrypted or decrypted), `APP_MASTER_KEY`, DB password. |
+| Business events | `inquiry.created`, `payment.confirmed`, `payment.replayed`, `payment.cvv_failed`, `session.created`. Each logs IDs and a masked subscriber number (`******0891`) only. |
+| Forbidden in logs | CVV, `sessionKey`, `payload` (encrypted or decrypted), `APP_MASTER_KEY`, DB password. |
 | Verification | `LogHygieneTest` runs the full payment flow with a captured appender and asserts that the forbidden strings never appear. Interns also `grep` their logs as a review item. |
 | Health | Spring Boot Actuator `health` only. No other actuator endpoints are exposed. |
 
@@ -554,7 +554,7 @@ The application **fails fast at startup** if `APP_MASTER_KEY` is missing or does
 
 | Level | Tooling | Focus |
 |---|---|---|
-| Unit | JUnit 5, AssertJ, Mockito | `AesGcmCipher` (round-trip, tamper, IV uniqueness), `ReplayGuard`, `FeeCalculator`, `MockPaymentEngine` (every digit, `_slow`, inactive), `ConfirmService` (idempotency, wrong PIN ×3, expiry), `PendingResolver`. The clock is injected (`java.time.Clock`) so expiry can be tested without sleeping. |
+| Unit | JUnit 5, AssertJ, Mockito | `AesGcmCipher` (round-trip, tamper, IV uniqueness), `ReplayGuard`, `FeeCalculator`, `MockPaymentEngine` (every digit, `_slow`, inactive), `ConfirmService` (idempotency, wrong CVV ×3, expiry), `PendingResolver`. The clock is injected (`java.time.Clock`) so expiry can be tested without sleeping. |
 | Integration | `@SpringBootTest` + Testcontainers PostgreSQL + MockMvc | Full HTTP flows, error envelope on every path, DB constraints (idempotency race), Flyway + seed, log hygiene. |
 | Contract | springdoc `/v3/api-docs` export diffed against the published spec in CI | Stops accidental contract drift after the freeze. |
 | Manual / demo | Postman collection, one folder per mock rule | Integration sessions with both client teams. |
@@ -574,7 +574,7 @@ The minimum of 8 unit tests from the brief is exceeded. The mapping is in LLD §
 | Migrations | Flyway | Versioned SQL checked into the repository (NFR-MNT-3). Seed data is a migration too. |
 | API docs | springdoc-openapi, Swagger UI at `/docs` | Generated from code (NFR-DOC-1). |
 | Crypto | JCA `javax.crypto` (`AES/GCM/NoPadding`), `SecureRandom` | Platform API named by the brief. No custom crypto. |
-| Password/PIN hashing | Spring Security Crypto `BCryptPasswordEncoder(12)` (crypto module only, no Spring Security filter chain) | bcrypt cost ≥ 12, without pulling in auth. |
+| Password/CVV hashing | Spring Security Crypto `BCryptPasswordEncoder(12)` (crypto module only, no Spring Security filter chain) | bcrypt cost ≥ 12, without pulling in auth. |
 | Rate limiting | Bucket4j (in-memory) | A simple token bucket per user and endpoint. |
 | Build | Maven | Standard. The Dockerfile uses a Maven build stage. |
 | Tests | JUnit 5, AssertJ, Mockito, Testcontainers | Real PostgreSQL in integration tests. |

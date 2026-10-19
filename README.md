@@ -63,7 +63,7 @@ curl -k https://localhost/v1/services \
 - HTTPS only: there is no HTTP listener. `-k` skips certificate checks for curl; clients pin the certificate instead (see [Certificate and SPKI pins](#certificate-and-spki-pins)).
 - Stop with `docker compose down`. Add `-v` to also wipe the database, which is re-seeded on the next start.
 
-Every call needs `X-Request-Id` (a UUID), `X-Client-Platform` (`ios` or `android`) and `X-Client-Version`. Payment calls encrypt the subscriber number and the PIN, so the easiest way to exercise the whole flow is the Postman collection:
+Every call needs `X-Request-Id` (a UUID), `X-Client-Platform` (`ios` or `android`) and `X-Client-Version`. Payment calls encrypt the subscriber number and the CVV, so the easiest way to exercise the whole flow is the Postman collection:
 
 ```bash
 npx newman run postman/momknpay.postman_collection.json --ssl-extra-ca-certs certs/cert.pem
@@ -94,7 +94,7 @@ curl --cacert certs/cert.pem --resolve api.momknpay.local:443:127.0.0.1 https://
 | GET | `/v1/services` | — | Full catalogue (inactive services included, shown disabled) |
 | GET | `/v1/services/sync?since=` | — | Delta since the last `syncedAt`, plus `deletedIds` |
 | POST | `/v1/payments/inquiry` | `X-User-Id`, `X-Session-Id` | Fees inquiry: encrypted subscriber number → a 5-minute quote |
-| POST | `/v1/payments/confirm` | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` | Pay the quote with the encrypted PIN, at most once per key |
+| POST | `/v1/payments/confirm` | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` | Pay the quote with the encrypted CVV, at most once per key |
 | GET | `/v1/payments/transactions?page=&size=` | `X-User-Id` | History, newest first |
 | GET | `/v1/payments/transactions/{id}` | `X-User-Id` | Receipt |
 
@@ -111,7 +111,7 @@ sequenceDiagram
     App->>API: POST /sessions → sessionKey (memory only)
     App->>API: POST /payments/inquiry {serviceId, AES-GCM(subscriberNumber, nonce, ts)}
     API-->>App: quote: amountDue, serviceFee, vat, total, expiresAt (+5 min)
-    App->>API: POST /payments/confirm {inquiryId, AES-GCM(pin, nonce, ts)} + Idempotency-Key
+    App->>API: POST /payments/confirm {inquiryId, AES-GCM(cvv, nonce, ts)} + Idempotency-Key
     API-->>App: SUCCESS / PENDING receipt, or a typed error
     App->>API: retry with the same Idempotency-Key → the same transaction, never a second one
 ```
@@ -122,11 +122,11 @@ sequenceDiagram
 
 **Seeded users** (the seed data is identical on every machine):
 
-| User | Mobile | PIN | Purpose |
+| User | Mobile | CVV | Purpose |
 |---|---|---|---|
-| `usr_01` | 01000000001 | 1234 | Happy path; has 6 payments in its history |
-| `usr_02` | 01000000002 | 1234 | Fresh account, empty history (keep it that way for demos) |
-| `usr_03` | 01000000003 | 9999 | Any other PIN is rejected: the wrong-PIN path |
+| `usr_01` | 01000000001 | 123 | Happy path; has 6 payments in its history |
+| `usr_02` | 01000000002 | 123 | Fresh account, empty history (keep it that way for demos) |
+| `usr_03` | 01000000003 | 123 | For the wrong-CVV path: send any other 3 digits |
 
 **Catalogue:** 24 services across all six categories, plus one soft-deleted service:
 
@@ -149,7 +149,7 @@ Other rules:
 
 - Services whose id ends in `_slow` answer after 8 s.
 - Inactive services return 503 `SERVICE_UNAVAILABLE`.
-- Three wrong PINs invalidate an inquiry (410 `INQUIRY_INVALIDATED`).
+- Three wrong CVVs invalidate an inquiry (410 `INQUIRY_INVALIDATED`).
 - Quotes expire after 5 minutes (410 `INQUIRY_EXPIRED`).
 
 **Fees**, in piastres and rounded up:
@@ -216,12 +216,12 @@ This is a scaled-down **teaching** design. It covers four things, done properly:
 | Control | Where |
 |---|---|
 | **TLS only**, self-signed certificate; clients pin the SPKI hash (live + backup) | Tomcat, `scripts/generate-certs.sh` |
-| **AES-256-GCM payload encryption** of the subscriber number and PIN: fresh 12-byte IV per message, 16-byte tag, key per session | `AesGcmCipher`, `PayloadDecryptor` |
+| **AES-256-GCM payload encryption** of the subscriber number and CVV: fresh 12-byte IV per message, 16-byte tag, key per session | `AesGcmCipher`, `PayloadDecryptor` |
 | **Replay protection:** `ts` within ±120 s, and each nonce accepted once (a database primary key) | `ReplayGuard`, `used_nonces` |
 | **Keys at rest:** session keys are stored wrapped with `APP_MASTER_KEY` (AES-GCM, bound to the session id) | `KeyWrapper` |
-| **PIN:** bcrypt cost 12, never stored or logged; 3 wrong PINs invalidate the inquiry | `ConfirmService` |
+| **CVV:** bcrypt cost 12, never stored or logged; 3 wrong CVVs invalidate the inquiry | `ConfirmService` |
 | **Rate limits:** 5/min per user on `POST /sessions` and `POST /payments/confirm` | `RateLimiter` |
-| **Log hygiene:** no PIN, key, payload or full subscriber number in logs (`******0891`) | `LogHygieneIT`, logback config |
+| **Log hygiene:** no CVV, key, payload or full subscriber number in logs (`******0891`) | `LogHygieneIT`, logback config |
 | **Secrets:** only in `.env` and `certs/`, both git-ignored; gitleaks scans the history in CI | `.gitleaks.toml`, CI |
 
 ---
@@ -232,7 +232,7 @@ Accepted because this is a teaching exercise ([SRS §8](docs/SRS.md)):
 
 1. **No authentication.** `X-User-Id` is trusted, so anyone who can reach the API can act as any user. Real auth would plug into `CurrentUserArgumentResolver` without changing controllers (ADR-002).
 2. **Anyone can obtain a session key for any user.** The payload encryption protects data in transit and in logs, not against a malicious caller.
-3. **A 4-digit PIN is the only payment control.** The rate limit and the 3-attempt rule only slow brute force down.
+3. **A 3-digit CVV is the only payment control.** The rate limit and the 3-attempt rule only slow brute force down.
 4. **The rate limiter is in memory.** It resets on restart and is per instance.
 5. **Timeout behaviour is the clients' job.** The mock `_slow` delay makes the server late; it does not simulate a dropped connection.
 
@@ -249,7 +249,7 @@ The full list, with causes and alternatives, is in [docs/DECISIONS.md](docs/DECI
 | 001 | No authentication module; every endpoint is public |
 | 002 | The user is identified by the `X-User-Id` header |
 | 003 | The AES key comes from `POST /sessions` (30 min, wrapped at rest) |
-| 004–005 | Users only from seed data; no passwords; the PIN is kept |
+| 004–005 | Users only from seed data; no passwords; the CVV is kept |
 | 006 | Rate-limit `/sessions` and `/payments/confirm` |
 | 007 | One distinct error code per failure path |
 | 008 | Idempotency is checked before decryption |
@@ -294,7 +294,7 @@ The full list, with causes and alternatives, is in [docs/DECISIONS.md](docs/DECI
 | `POST /payments/inquiry` | 28.7 | 52.8 | 300 |
 | `POST /payments/confirm` (10 samples, rate-limited) | 233.8 | 236.3 | 500 |
 
-Confirm is dominated by the bcrypt cost-12 PIN check, which takes about 230 ms by itself. That is a deliberate security cost (ADR-010).
+Confirm is dominated by the bcrypt cost-12 CVV check, which takes about 230 ms by itself. That is a deliberate security cost (ADR-010).
 
 ---
 
@@ -321,7 +321,7 @@ The contract is [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). It is mi
 │   ├── catalog/       services catalogue and delta sync
 │   ├── payment/       inquiry, confirm, mock engine, fee calculator
 │   ├── transaction/   history, receipts, pending resolution
-│   └── db/migration/  V3__SeedUsers (Java migration: bcrypt PINs)
+│   └── db/migration/  V3__SeedUsers (Java migration: bcrypt CVVs)
 ├── src/main/resources/db/migration/   V1 schema · V2 services · V4 history · V5 drop sessions · V6 restore sessions
 ├── src/test/java/…    unit tests (*Test), integration tests (*IT), support helpers
 ├── docs/              SRS, HLD, LLD, coding standards, milestones, decisions, openapi.yaml

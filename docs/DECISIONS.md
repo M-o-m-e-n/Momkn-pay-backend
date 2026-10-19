@@ -22,6 +22,7 @@ flowchart TD
     C --> H[ADR-008<br/>Idempotency check before decryption]
     C -.-> K[ADR-011<br/>No sessions, static shared key<br/>superseded]
     K -.-> L[ADR-012<br/>Sessions restored]
+    E -.-> N[ADR-014<br/>3-digit CVV replaces the PIN]
     I[ADR-009<br/>Spring Boot + Java 25]
 ```
 
@@ -33,7 +34,7 @@ flowchart TD
 | [002](#adr-002--identify-the-user-with-the-x-user-id-header) | Identify the user with the `X-User-Id` header | Accepted |
 | [003](#adr-003--issue-the-encryption-key-from-post-sessions) | Issue the encryption key from `POST /sessions` | Accepted (reinstated by ADR-012) |
 | [004](#adr-004--users-come-only-from-seed-data) | Users come only from seed data | Accepted |
-| [005](#adr-005--remove-passwords-keep-the-pin) | Remove passwords, keep the PIN | Accepted |
+| [005](#adr-005--remove-passwords-keep-the-pin) | Remove passwords, keep the PIN | Accepted (the PIN became a CVV in ADR-014) |
 | [006](#adr-006--move-the-login-rate-limit-to-post-sessions) | Move the login rate limit to `POST /sessions` | Accepted |
 | [007](#adr-007--add-specific-error-codes-for-the-new-failure-paths) | Add specific error codes for the new failure paths | Accepted |
 | [008](#adr-008--check-idempotency-before-decrypting) | Check idempotency before decrypting | Accepted |
@@ -41,6 +42,9 @@ flowchart TD
 | [010](#adr-010--confirm-gets-a-500-ms-latency-budget-bcrypt-stays-at-cost-12) | Confirm gets a 500 ms latency budget; bcrypt stays at cost 12 | Accepted |
 | [011](#adr-011--remove-sessions-encrypt-payloads-with-one-static-shared-key) | Remove sessions; encrypt payloads with one static shared key | **Superseded by ADR-012** |
 | [012](#adr-012--bring-sessions-back-the-payload-key-is-issued-per-session-again) | Bring sessions back: the payload key is issued per session again | Accepted |
+| [014](#adr-014--confirm-payments-with-a-3-digit-cvv-instead-of-the-pin) | Confirm payments with a 3-digit CVV instead of the PIN | Accepted |
+
+ADR-013 is used by the separate key-agreement variant on branch `feature/M7-key-agreement`, which is not part of this line.
 
 ---
 
@@ -364,6 +368,35 @@ The contract moves to **v3.0.0**, a second breaking change.
 - ✅ The v1.0.0 code, tests and Postman requests were restored from git history rather than rewritten.
 - ❌ **Breaking contract change** for the second time: both client tracks must call `POST /sessions`, send `X-Session-Id`, and drop the built-in key.
 - ❌ There is still no authentication (ADR-001), so anyone can request a session for any user. The key protects payloads in transit and in logs, not against a malicious caller (SRS §8, L-2).
+
+---
+
+## ADR-014 — Confirm payments with a 3-digit CVV instead of the PIN
+
+**Status:** Accepted · **Date:** 2026-10-19 · **Amends:** ADR-005 · **Affects:** contract v4.0.0, SRS FR-PAY-1…7, LLD §6.9, §9.4 and §11.5
+
+### Context
+The apps confirm a payment with a card-style screen, and the product owner asked for the secret on that screen to be a 3-digit CVV instead of a 4-digit PIN, with `123` as the value that is accepted.
+
+### Decision
+- The decrypted confirm payload is `{ cvv, nonce, ts }`; `cvv` must match `^[0-9]{3}$`.
+- A malformed or wrong CVV gives `400 VALIDATION_ERROR` with `field: "cvv"`. Only a wrong (well-formed) CVV counts, and the third one on an inquiry still invalidates it (`410 INQUIRY_INVALIDATED`).
+- The CVV is stored and compared exactly like the PIN was: bcrypt cost 12, never logged, printed or returned.
+- `V8__PinToCvv` (a Java migration, like V3) renames `users.pin_hash` → `cvv_hash` and `inquiries.failed_pin_attempts` → `failed_cvv_attempts`, and sets every user's CVV to `123`. V1–V7 are not edited.
+
+The contract moves to **v4.0.0**, a breaking change: the payload field and the error `field` are renamed.
+
+### Alternatives considered
+| Alternative | Why it was rejected |
+|---|---|
+| Accept `cvv` and keep `pin` as an alias for a while | Two names for one secret in the decryptor and in every test, for apps that can simply ship the rename together. |
+| Keep the column names and only change the rule | The schema and the code would say "PIN" for something that is a CVV. |
+
+### Consequences
+- ✅ The API, database and code use one name for the secret.
+- ❌ **Breaking contract change**: both apps must send `cvv` (3 digits) and read `field: "cvv"`.
+- ❌ A 3-digit secret has 1 000 values instead of 10 000. The 3-attempt rule per inquiry and 5 confirms/min still apply, so this stays a simulation (SRS L-3).
+- ❌ A real card CVV must **never** be stored after authorisation, not even hashed (PCI DSS). Here it is a per-user test secret in a simulated system, not card data.
 
 ---
 

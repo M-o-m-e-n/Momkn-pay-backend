@@ -71,7 +71,7 @@ If a prompt conflicts with these documents, **stop and say so**. Do not silently
 
 ## Hard rules (never break them, even if asked casually; push back and explain)
 
-1. **Never log, store or return** the PIN, the session key, `payload` (encrypted or decrypted) or the master key. Mask subscriber numbers in logs (`******0891`).
+1. **Never log, store or return** the CVV, the session key, `payload` (encrypted or decrypted) or the master key. Mask subscriber numbers in logs (`******0891`).
 2. **Never commit secrets**: `.env`, keystores, `*.pem`, `*.p12`, keys. Update `.env.example` instead.
 3. **Never change the API contract** (paths, fields, status or error codes) without the user confirming the contract-change process (issue, sign-off from both client tracks, version bump in the changelog).
 4. **Never add an auth module, JWT, passwords or login** unless the user explicitly reopens ADR-001, and never replace the per-session key with a static or built-in key unless the user reopens ADR-012.
@@ -108,6 +108,6 @@ Use the Maven wrapper. Integration tests (`*IT`) need Docker running (Testcontai
 ## Environment notes
 
 - Windows 11 dev machine. Use forward slashes in paths. Files are UTF-8 with LF line endings.
-- Seeded test users: `usr_01` (PIN 1234, has history), `usr_02` (PIN 1234, empty history), `usr_03` (PIN 9999).
+- Seeded test users: `usr_01` (CVV 123, has history), `usr_02` (CVV 123, empty history), `usr_03` (CVV 123, used for the wrong-CVV path).
 - Worked example for sanity checks: subscriber `1024750891` at `svc_elec_cairo` → amountDue 24750, fee 500, VAT 70, total **25320**.
 - Mock outcome = last digit of the subscriber number: 0 → not found, 1–5 → success, 6 → above max, 7 → declined, 8 → pending for 10 s, 9 → already paid. `_slow` services add 8 s. Inactive → 503.
