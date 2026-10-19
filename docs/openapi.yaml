@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Momkn Pay API
-  version: 4.0.0
+  version: 4.1.0
   summary: Simulated bill-payment API for the Momkn Pay internship capstone.
   description: |
     Contract shared by the backend, iOS and Android tracks. Frozen after publication:
@@ -26,6 +26,7 @@ info:
     | 2.0.0 | 2026-10-01 | **Breaking.** Sessions removed: `POST /sessions`, `DELETE /sessions/{sessionId}` and the `X-Session-Id` header are gone; payloads are encrypted with one static shared key. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` removed; inquiry no longer returns 410. (ADR-011) |
     | 3.0.0 | 2026-10-06 | **Breaking.** Sessions restored as in 1.0.0: `POST /sessions` issues a 30-minute AES-256 key, `DELETE /sessions/{sessionId}` revokes it, and inquiry and confirm require the `X-Session-Id` header. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` are back; the static shared key of 2.0.0 is gone. (ADR-012) |
     | 4.0.0 | 2026-10-19 | **Breaking.** Payments are confirmed with a 3-digit CVV instead of the 4-digit CVV: the confirm payload is `{cvv, nonce, ts}` (`cvv` matches `^[0-9]{3}$`), and a wrong or malformed CVV is `VALIDATION_ERROR` with `field: "cvv"`. Three wrong CVVs still invalidate the inquiry. (ADR-014) |
+    | 4.1.0 | 2026-10-19 | New `GET /ads`: the home-screen banners, each with an image and an https link the app opens in the browser. Public, like the catalogue. Additive, nothing else changes. |
 # Deliberately public: no security schemes (ADR-001).
 security: []
 servers:
@@ -38,6 +39,8 @@ tags:
     description: The current user's profile.
   - name: Catalogue
     description: Payable services and delta sync for offline-first clients.
+  - name: Ads
+    description: Home-screen banners that open a link in the browser.
   - name: Payments
     description: Fees inquiry and idempotent payment confirmation.
   - name: Transactions
@@ -199,6 +202,36 @@ paths:
                     maxAmount: 500000
                     isActive: false
                     updatedAt: '2026-09-18T09:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /ads:
+    get:
+      tags: [Ads]
+      operationId: listAds
+      summary: Active home-screen ads, in display order
+      description: |
+        Show `imageUrl` (1200×400 PNG, 3:1) in a carousel. On tap, open `linkUrl` in the
+        browser; it is always `https`. The titles are the accessibility label and the fallback
+        when the image cannot be loaded. Public: no `X-User-Id` needed.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/ClientPlatform'
+        - $ref: '#/components/parameters/ClientVersion'
+      responses:
+        '200':
+          description: Ads.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdListResponse' }
+              example:
+                items:
+                  - id: ad_nbe
+                    titleEn: 'National Bank of Egypt: accounts, cards and digital banking'
+                    titleAr: 'البنك الأهلي المصري: حسابات وبطاقات وخدمات رقمية'
+                    imageUrl: https://momkn.ahmedsayed.net/ads/ad-nbe.png
+                    linkUrl: https://www.nbe.com.eg
         '400': { $ref: '#/components/responses/BadRequest' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -590,6 +623,23 @@ components:
           type: array
           items: { type: string }
           example: [svc_water_legacy]
+
+    AdItem:
+      type: object
+      required: [id, titleEn, titleAr, imageUrl, linkUrl]
+      properties:
+        id: { type: string, example: ad_nbe }
+        titleEn: { type: string, maxLength: 120, example: 'National Bank of Egypt: accounts, cards and digital banking' }
+        titleAr: { type: string, maxLength: 120, example: 'البنك الأهلي المصري: حسابات وبطاقات وخدمات رقمية' }
+        imageUrl: { type: string, format: uri, example: 'https://momkn.ahmedsayed.net/ads/ad-nbe.png' }
+        linkUrl: { type: string, format: uri, pattern: '^https://', example: 'https://www.nbe.com.eg' }
+    AdListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdItem' }
 
     EncryptedPayload:
       type: string

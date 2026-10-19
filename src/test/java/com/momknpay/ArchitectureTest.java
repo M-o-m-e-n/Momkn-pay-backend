@@ -51,6 +51,7 @@ class ArchitectureTest {
                     .should()
                     .dependOnClassesThat()
                     .resideInAnyPackage(
+                            "com.momknpay.ad..",
                             "com.momknpay.catalog..",
                             "com.momknpay.user..",
                             "com.momknpay.session..",
