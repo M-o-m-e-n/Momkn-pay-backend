@@ -1,0 +1,6 @@
+# Findings reviewed and accepted (gitleaks fingerprints). Each one is a documented NON-secret.
+#
+# Test-only P-256 key pair of the session handshake, on branch feature/M7-key-agreement
+# (src/test/resources/config/application.yml). Valid only in tests; the real key comes from
+# APP_SESSION_PRIVATE_KEY and is never committed.
+43e2c54f67816495851b3c3770fd37bac0319a85:src/test/resources/config/application.yml:generic-api-key:7
