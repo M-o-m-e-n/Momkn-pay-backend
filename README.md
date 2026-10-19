@@ -93,6 +93,7 @@ curl --cacert certs/cert.pem --resolve api.momknpay.local:443:127.0.0.1 https://
 | PATCH | `/v1/profile` | `X-User-Id` | Update full name and/or email (mobile is read-only) |
 | GET | `/v1/services` | — | Full catalogue (inactive services included, shown disabled) |
 | GET | `/v1/services/sync?since=` | — | Delta since the last `syncedAt`, plus `deletedIds` |
+| GET | `/v1/ads` | — | Home-screen ads: an image and an https link to open in the browser |
 | POST | `/v1/payments/inquiry` | `X-User-Id`, `X-Session-Id` | Fees inquiry: encrypted subscriber number → a 5-minute quote |
 | POST | `/v1/payments/confirm` | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` | Pay the quote with the encrypted CVV, at most once per key |
 | GET | `/v1/payments/transactions?page=&size=` | `X-User-Id` | History, newest first |

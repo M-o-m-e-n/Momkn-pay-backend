@@ -2,6 +2,15 @@
 
 All notable changes to the Momkn Pay backend. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/). API contract changes are also recorded in the changelog inside [`docs/openapi.yaml`](docs/openapi.yaml).
 
+## [4.1.0] — 2026-10-19
+
+Contract v4.1.0. Additive: nothing changes for existing calls.
+
+### Added
+- `GET /v1/ads` (public) returns the home-screen ads in display order: `{ items: [{ id, titleEn, titleAr, imageUrl, linkUrl }] }`. The app shows the image and opens `linkUrl` (always https) in the browser.
+- Five ads (National Bank of Egypt, Vodafone, e&, Orange, WE) with 1200×400 PNG banners served at `/ads/`. Migration `V9__ads.sql` creates and seeds the `ads` table.
+- Postman request "03 Catalogue → List ads".
+
 ## [4.0.0] — 2026-10-19
 
 **Breaking:** payments are confirmed with a 3-digit CVV instead of the 4-digit PIN (ADR-014). Contract v4.0.0.

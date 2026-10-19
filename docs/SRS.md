@@ -181,6 +181,17 @@ The session replaces "session key issued at login" from the brief. It exists onl
 | FR-CAT-6 | A missing or unparseable `since` gives `400 VALIDATION_ERROR` (`field: "since"`). |
 | FR-CAT-7 | The catalogue endpoints do not need `X-User-Id`, because the catalogue is public data. |
 
+### 3.4a Home-screen ads (FR-AD)
+
+| ID | Requirement |
+|---|---|
+| FR-AD-1 | `GET /ads` MUST return the active ads in display order, in the envelope `{ items[] }`. Inactive ads are not returned. |
+| FR-AD-2 | Each item MUST include `id`, `titleEn`, `titleAr`, `imageUrl` and `linkUrl`. The app shows the image and, on tap, opens `linkUrl` in the browser. |
+| FR-AD-3 | `GET /ads` does not need `X-User-Id`, because the ads are the same for everyone. |
+| FR-AD-4 | `linkUrl` MUST be an `https` URL; the database refuses anything else. Images are 1200×400 PNG served by the backend at `/ads/` without API headers. |
+
+Ads are seeded and changed by migrations; there is no admin screen, no scheduling, no targeting and no click tracking.
+
 ### 3.5 Fees inquiry (FR-INQ)
 
 | ID | Requirement |
@@ -315,6 +326,7 @@ Clients switch on `code`, never on the message text. `field` names the offending
 | 8 | POST | `/payments/confirm` | `X-User-Id`, `X-Session-Id`, `Idempotency-Key` | Pay (encrypted body, idempotent) |
 | 9 | GET | `/payments/transactions?page=&size=` | `X-User-Id` | History |
 | 10 | GET | `/payments/transactions/{id}` | `X-User-Id` | Single receipt |
+| 11 | GET | `/ads` | — | Home-screen ads |
 
 Tooling endpoints (outside `/v1`, no custom headers needed): `GET /docs` (Swagger UI), `GET /v3/api-docs` (OpenAPI JSON), `GET /actuator/health`.
 

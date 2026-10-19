@@ -74,8 +74,10 @@ momknpay-backend/
     │           ├── V5__drop_sessions.sql      # contract v2.0.0 (ADR-011)
     │           ├── V6__restore_sessions.sql   # contract v3.0.0 (ADR-012): same tables and columns as V1
     │           ├── V7__service_icons.sql      # icon_url → the icons below (§11.4)
+    │           ├── V9__ads.sql                # the ads table and its seed (§11.6)
     │       (V8__PinToCvv is a Java migration, see §11.5)
     │       static/icons/                      # service icons, served at /icons/ (§11.4)
+    │       static/ads/                        # ad banners, served at /ads/ (§11.6)
     │       (V3__SeedUsers is a Java migration, see §11.2)
     └── test/java/com/momknpay/...  # see §12
 ```
@@ -687,6 +689,34 @@ public record ConfirmResponse(String transactionId, TransactionStatus status, St
 |---|---|
 | Success | `200` |
 | Errors | `400 VALIDATION_ERROR` (headers, `id` longer than 32 characters), `404 TRANSACTION_NOT_FOUND` (unknown or foreign), `404 USER_NOT_FOUND` |
+
+### 6.11 `GET /v1/ads` — home-screen ads
+
+Public: no `X-User-Id`. Package `com.momknpay.ad` (`Ad`, `AdRepository.findByActiveTrueOrderBySortOrderAscIdAsc`, `AdService`, `AdController`).
+
+```json
+{
+  "items": [
+    {
+      "id": "ad_nbe",
+      "titleEn": "National Bank of Egypt: accounts, cards and digital banking",
+      "titleAr": "البنك الأهلي المصري: حسابات وبطاقات وخدمات رقمية",
+      "imageUrl": "https://momkn.ahmedsayed.net/ads/ad-nbe.png",
+      "linkUrl": "https://www.nbe.com.eg"
+    }
+  ]
+}
+```
+
+```java
+public record AdItem(String id, String titleEn, String titleAr, String imageUrl, String linkUrl) {}
+public record AdListResponse(List<AdItem> items) {}
+```
+
+| | |
+|---|---|
+| Success | `200`, active ads ordered by `sort_order`, then `id` |
+| Errors | `400 VALIDATION_ERROR` (headers) |
 
 ```json
 {
@@ -1326,6 +1356,30 @@ ALTER TABLE users RENAME COLUMN pin_hash TO cvv_hash;
 ALTER TABLE inquiries RENAME COLUMN failed_pin_attempts TO failed_cvv_attempts;  -- the CHECK follows the column
 UPDATE users SET cvv_hash = bcrypt('123');                                         -- every user, cost 12
 ```
+
+### 11.6 `V9__ads.sql` — home-screen ads
+
+```sql
+CREATE TABLE ads (
+    id          VARCHAR(32)  PRIMARY KEY,
+    title_en    VARCHAR(120) NOT NULL,
+    title_ar    VARCHAR(120) NOT NULL,
+    image_url   VARCHAR(255) NOT NULL,
+    link_url    VARCHAR(500) NOT NULL CONSTRAINT ck_ads_link_https CHECK (link_url LIKE 'https://%'),
+    sort_order  SMALLINT     NOT NULL,
+    is_active   BOOLEAN      NOT NULL DEFAULT TRUE
+);
+```
+
+| sort | id | Links to | Image |
+|---|---|---|---|
+| 1 | `ad_nbe` | `https://www.nbe.com.eg` | `ad-nbe.png` |
+| 2 | `ad_vodafone` | `https://web.vodafone.com.eg` | `ad-vodafone.png` |
+| 3 | `ad_eand` | `https://www.etisalat.eg` | `ad-eand.png` |
+| 4 | `ad_orange` | `https://www.orange.eg` | `ad-orange.png` |
+| 5 | `ad_we` | `https://te.eg` | `ad-we.png` |
+
+The banners are our own 1200×400 PNGs (brand colour, company name, a one-line description). They contain no company logos or images copied from the companies' websites; official artwork needs the brand owner's permission and can replace a file under a new name later. Like the icons, `image_url` names the deployed host and the files are cached for a day.
 
 ---
 

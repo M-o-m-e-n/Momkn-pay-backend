@@ -417,6 +417,26 @@ flowchart LR
 
 ---
 
+## M9 — Home-screen ads (after v4.0)
+
+- [ ] **M9 complete** (all slices done; both apps show the ads)
+
+**Goal:** the home screen shows a carousel of ads; tapping one opens its link in the browser.
+**Exit demo:** both apps show the five banners in order and open the right website on tap.
+
+- [x] **M9-S1 · Ads endpoint, banners and seed**
+  - [x] Contract v4.1.0: `GET /ads` (public), `AdItem`, `AdListResponse`; changelog row.
+  - [x] `V9__ads.sql` with an https-only `link_url`; five banners in `static/ads/`.
+  - [x] `AdIT`: order, shape, inactive ads hidden, every image served without headers, a non-https link refused. Postman "List ads".
+  - [x] **Done when:** `./mvnw clean verify` is green, `OpenApiContractIT` matches v4.1.0, and every `imageUrl` returns a PNG.
+  - Refs: SRS FR-AD-1…4, LLD §6.11 and §11.6
+
+- [ ] **M9-S2 · Client tracks** *(manual)*
+  - [ ] Share contract v4.1.0 with both client tracks.
+  - [ ] **Done when:** both apps show the carousel and open the links.
+
+---
+
 ## Definition of done — backend (from the brief, adapted)
 
 - [ ] Every endpoint in SRS §4.6 works against the Dockerised backend and is used by both apps *(the backend side is done and proven by Newman; the apps are the client tracks')*
