@@ -2,6 +2,11 @@
 
 All notable changes to the Momkn Pay backend. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/). API contract changes are also recorded in the changelog inside [`docs/openapi.yaml`](docs/openapi.yaml).
 
+## [4.1.1] — 2026-10-19
+
+### Changed
+- Ad banners are 16:9 (1280×720 PNG) instead of 3:1, under new file names (`ad-<name>-16x9.png`) so no cached 3:1 banner is shown. Migration `V10__ads_16x9.sql` updates `imageUrl`; the fields are unchanged.
+
 ## [4.1.0] — 2026-10-19
 
 Contract v4.1.0. Additive: nothing changes for existing calls.

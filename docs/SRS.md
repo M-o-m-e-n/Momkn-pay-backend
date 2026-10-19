@@ -188,7 +188,7 @@ The session replaces "session key issued at login" from the brief. It exists onl
 | FR-AD-1 | `GET /ads` MUST return the active ads in display order, in the envelope `{ items[] }`. Inactive ads are not returned. |
 | FR-AD-2 | Each item MUST include `id`, `titleEn`, `titleAr`, `imageUrl` and `linkUrl`. The app shows the image and, on tap, opens `linkUrl` in the browser. |
 | FR-AD-3 | `GET /ads` does not need `X-User-Id`, because the ads are the same for everyone. |
-| FR-AD-4 | `linkUrl` MUST be an `https` URL; the database refuses anything else. Images are 1200×400 PNG served by the backend at `/ads/` without API headers. |
+| FR-AD-4 | `linkUrl` MUST be an `https` URL; the database refuses anything else. Images are 16:9 PNG (1280×720) served by the backend at `/ads/` without API headers. |
 
 Ads are seeded and changed by migrations; there is no admin screen, no scheduling, no targeting and no click tracking.
 

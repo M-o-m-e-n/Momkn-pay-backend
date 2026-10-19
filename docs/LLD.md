@@ -75,6 +75,7 @@ momknpay-backend/
     │           ├── V6__restore_sessions.sql   # contract v3.0.0 (ADR-012): same tables and columns as V1
     │           ├── V7__service_icons.sql      # icon_url → the icons below (§11.4)
     │           ├── V9__ads.sql                # the ads table and its seed (§11.6)
+    │           ├── V10__ads_16x9.sql          # 16:9 banners (§11.6)
     │       (V8__PinToCvv is a Java migration, see §11.5)
     │       static/icons/                      # service icons, served at /icons/ (§11.4)
     │       static/ads/                        # ad banners, served at /ads/ (§11.6)
@@ -701,7 +702,7 @@ Public: no `X-User-Id`. Package `com.momknpay.ad` (`Ad`, `AdRepository.findByAct
       "id": "ad_nbe",
       "titleEn": "National Bank of Egypt: accounts, cards and digital banking",
       "titleAr": "البنك الأهلي المصري: حسابات وبطاقات وخدمات رقمية",
-      "imageUrl": "https://momkn.ahmedsayed.net/ads/ad-nbe.png",
+      "imageUrl": "https://momkn.ahmedsayed.net/ads/ad-nbe-16x9.png",
       "linkUrl": "https://www.nbe.com.eg"
     }
   ]
@@ -1373,13 +1374,13 @@ CREATE TABLE ads (
 
 | sort | id | Links to | Image |
 |---|---|---|---|
-| 1 | `ad_nbe` | `https://www.nbe.com.eg` | `ad-nbe.png` |
-| 2 | `ad_vodafone` | `https://web.vodafone.com.eg` | `ad-vodafone.png` |
-| 3 | `ad_eand` | `https://www.etisalat.eg` | `ad-eand.png` |
-| 4 | `ad_orange` | `https://www.orange.eg` | `ad-orange.png` |
-| 5 | `ad_we` | `https://te.eg` | `ad-we.png` |
+| 1 | `ad_nbe` | `https://www.nbe.com.eg` | `ad-nbe-16x9.png` |
+| 2 | `ad_vodafone` | `https://web.vodafone.com.eg` | `ad-vodafone-16x9.png` |
+| 3 | `ad_eand` | `https://www.etisalat.eg` | `ad-eand-16x9.png` |
+| 4 | `ad_orange` | `https://www.orange.eg` | `ad-orange-16x9.png` |
+| 5 | `ad_we` | `https://te.eg` | `ad-we-16x9.png` |
 
-The banners are our own 1200×400 PNGs (brand colour, company name, a one-line description). They contain no company logos or images copied from the companies' websites; official artwork needs the brand owner's permission and can replace a file under a new name later. Like the icons, `image_url` names the deployed host and the files are cached for a day.
+The banners are our own 16:9 PNGs (1280×720; `V10__ads_16x9.sql` replaced the first 3:1 set under new file names) (brand colour, company name, a one-line description). They contain no company logos or images copied from the companies' websites; official artwork needs the brand owner's permission and can replace a file under a new name later. Like the icons, `image_url` names the deployed host and the files are cached for a day.
 
 ---
 
