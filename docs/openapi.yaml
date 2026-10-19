@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Momkn Pay API
-  version: 4.1.0
+  version: 4.1.1
   summary: Simulated bill-payment API for the Momkn Pay internship capstone.
   description: |
     Contract shared by the backend, iOS and Android tracks. Frozen after publication:
@@ -27,6 +27,7 @@ info:
     | 3.0.0 | 2026-10-06 | **Breaking.** Sessions restored as in 1.0.0: `POST /sessions` issues a 30-minute AES-256 key, `DELETE /sessions/{sessionId}` revokes it, and inquiry and confirm require the `X-Session-Id` header. Error codes `SESSION_NOT_FOUND` and `SESSION_EXPIRED` are back; the static shared key of 2.0.0 is gone. (ADR-012) |
     | 4.0.0 | 2026-10-19 | **Breaking.** Payments are confirmed with a 3-digit CVV instead of the 4-digit CVV: the confirm payload is `{cvv, nonce, ts}` (`cvv` matches `^[0-9]{3}$`), and a wrong or malformed CVV is `VALIDATION_ERROR` with `field: "cvv"`. Three wrong CVVs still invalidate the inquiry. (ADR-014) |
     | 4.1.0 | 2026-10-19 | New `GET /ads`: the home-screen banners, each with an image and an https link the app opens in the browser. Public, like the catalogue. Additive, nothing else changes. |
+    | 4.1.1 | 2026-10-19 | Ad images are 16:9 (1280×720 PNG) instead of 3:1; same fields. |
 # Deliberately public: no security schemes (ADR-001).
 security: []
 servers:
@@ -211,7 +212,7 @@ paths:
       operationId: listAds
       summary: Active home-screen ads, in display order
       description: |
-        Show `imageUrl` (1200×400 PNG, 3:1) in a carousel. On tap, open `linkUrl` in the
+        Show `imageUrl` (1280×720 PNG, 16:9) in a carousel. On tap, open `linkUrl` in the
         browser; it is always `https`. The titles are the accessibility label and the fallback
         when the image cannot be loaded. Public: no `X-User-Id` needed.
       parameters:
@@ -230,7 +231,7 @@ paths:
                   - id: ad_nbe
                     titleEn: 'National Bank of Egypt: accounts, cards and digital banking'
                     titleAr: 'البنك الأهلي المصري: حسابات وبطاقات وخدمات رقمية'
-                    imageUrl: https://momkn.ahmedsayed.net/ads/ad-nbe.png
+                    imageUrl: https://momkn.ahmedsayed.net/ads/ad-nbe-16x9.png
                     linkUrl: https://www.nbe.com.eg
         '400': { $ref: '#/components/responses/BadRequest' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -631,7 +632,7 @@ components:
         id: { type: string, example: ad_nbe }
         titleEn: { type: string, maxLength: 120, example: 'National Bank of Egypt: accounts, cards and digital banking' }
         titleAr: { type: string, maxLength: 120, example: 'البنك الأهلي المصري: حسابات وبطاقات وخدمات رقمية' }
-        imageUrl: { type: string, format: uri, example: 'https://momkn.ahmedsayed.net/ads/ad-nbe.png' }
+        imageUrl: { type: string, format: uri, example: 'https://momkn.ahmedsayed.net/ads/ad-nbe-16x9.png' }
         linkUrl: { type: string, format: uri, pattern: '^https://', example: 'https://www.nbe.com.eg' }
     AdListResponse:
       type: object

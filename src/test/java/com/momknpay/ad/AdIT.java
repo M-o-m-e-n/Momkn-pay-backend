@@ -43,7 +43,7 @@ class AdIT {
         assertThat(items.getFirst())
                 .containsOnlyKeys("id", "titleEn", "titleAr", "imageUrl", "linkUrl")
                 .containsEntry("linkUrl", "https://www.nbe.com.eg")
-                .containsEntry("imageUrl", "https://momkn.ahmedsayed.net/ads/ad-nbe.png");
+                .containsEntry("imageUrl", "https://momkn.ahmedsayed.net/ads/ad-nbe-16x9.png");
     }
 
     @Test
